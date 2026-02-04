@@ -201,8 +201,8 @@ const formattedDate = computed(() => {
 }
 
 .overlay-btn.primary {
-  background: var(--primary, #ff2442);
-  border-color: var(--primary, #ff2442);
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .overlay-btn.primary:hover {

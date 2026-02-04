@@ -3,10 +3,10 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">创作完成</h1>
-        <p class="page-subtitle">恭喜！你的小红书图文已生成完毕，共 {{ store.images.length }} 张</p>
+        <p class="page-subtitle">恭喜！你的图文已生成完毕，共 {{ store.images.length }} 张</p>
       </div>
-      <div style="display: flex; gap: 12px;">
-        <button class="btn" @click="startOver" style="background: white; border: 1px solid var(--border-color);">
+      <div class="page-actions">
+        <button class="btn btn-secondary" @click="startOver">
           再来一篇
         </button>
         <button class="btn btn-primary" @click="downloadAll">
@@ -18,36 +18,36 @@
 
     <div class="card">
       <div class="grid-cols-4">
-        <div v-for="image in store.images" :key="image.index" class="image-card group">
+        <div v-for="image in store.images" :key="image.index" class="image-card">
           <!-- Image Area -->
           <div
             v-if="image.url"
-            style="position: relative; aspect-ratio: 3/4; overflow: hidden; cursor: pointer;"
+            class="result-image"
             @click="viewImage(image.url)"
           >
             <img
               :src="image.url"
               :alt="`第 ${image.index + 1} 页`"
-              style="width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s;"
+              class="result-image-img"
             />
             <!-- Regenerating Overlay -->
-            <div v-if="regeneratingIndex === image.index" style="position: absolute; inset: 0; background: rgba(255,255,255,0.8); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10;">
-               <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; border-color: var(--primary); border-top-color: transparent;"></div>
-               <span style="font-size: 12px; color: var(--primary); margin-top: 8px; font-weight: 600;">重绘中...</span>
+            <div v-if="regeneratingIndex === image.index" class="regenerating-overlay">
+               <div class="spinner spinner-primary"></div>
+               <span class="regenerating-text">重绘中...</span>
             </div>
 
             <!-- Hover Overlay -->
-            <div v-else style="position: absolute; inset: 0; background: rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.2s; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600;" class="hover-overlay">
+            <div v-else class="hover-overlay">
               预览大图
             </div>
           </div>
 
           <!-- Action Bar -->
-          <div style="padding: 12px; border-top: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 12px; color: var(--text-sub);">Page {{ image.index + 1 }}</span>
-            <div style="display: flex; gap: 8px;">
+          <div class="result-actions">
+            <span class="result-meta">Page {{ image.index + 1 }}</span>
+            <div class="result-actions-right">
               <button
-                style="border: none; background: none; color: var(--text-sub); cursor: pointer; display: flex; align-items: center;"
+                class="icon-btn"
                 title="重新生成此图"
                 @click="handleRegenerate(image)"
                 :disabled="regeneratingIndex === image.index"
@@ -55,7 +55,7 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
               </button>
               <button
-                style="border: none; background: none; color: var(--primary); cursor: pointer; font-size: 12px;"
+                class="btn-link"
                 @click="downloadOne(image)"
               >
                 下载
@@ -72,6 +72,68 @@
 </template>
 
 <style scoped>
+/* Result images */
+.result-image {
+  position: relative;
+  aspect-ratio: 3/4;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.result-image-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.image-card:hover .result-image-img {
+  transform: scale(1.05);
+}
+
+.regenerating-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.78);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+}
+
+.spinner-primary {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+  border-color: var(--primary);
+  border-top-color: transparent;
+}
+
+.regenerating-text {
+  font-size: 12px;
+  color: var(--primary);
+  margin-top: 8px;
+  font-weight: 650;
+}
+
+.hover-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.30);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 650;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
 /* 确保图片预览区域正确填充 */
 .image-card > div:first-child {
   flex: 1;
@@ -82,8 +144,40 @@
 .image-card:hover .hover-overlay {
   opacity: 1;
 }
-.image-card:hover img {
-  transform: scale(1.05);
+
+.result-actions {
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.result-meta {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.result-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-link {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 6px 8px;
+  border-radius: 10px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.btn-link:hover {
+  background: rgba(10, 132, 255, 0.12);
 }
 </style>
 

@@ -1,7 +1,8 @@
 services:
-  redink:
-    image: histonemax/redink:latest
-    container_name: redink
+  csslab:
+    build: .
+    image: csslab:local
+    container_name: csslab
     ports:
       - "12398:12398"
     volumes:

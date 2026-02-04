@@ -338,7 +338,7 @@ const previewUrl = computed(() => {
 
 .form-input:focus {
   outline: none;
-  border-color: var(--primary, #ff2442);
+  border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(255, 36, 66, 0.1);
 }
 
@@ -378,7 +378,7 @@ const previewUrl = computed(() => {
 }
 
 .toggle-switch.active {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
 }
 
 .toggle-slider {
@@ -424,8 +424,8 @@ const previewUrl = computed(() => {
 }
 
 .btn-primary {
-  background: var(--primary, #ff2442);
-  border-color: var(--primary, #ff2442);
+  background: var(--primary);
+  border-color: var(--primary);
   color: white;
 }
 

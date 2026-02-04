@@ -1,33 +1,73 @@
 :root {
-  /* 配色方案 - 现代简约风格 */
-  --bg-body: #F4F5F7;
-  --bg-sidebar: #FFFFFF;
-  --bg-card: #FFFFFF;
-  
-  --primary: #FF2442; /* 小红书红 */
-  --primary-hover: #FF4D6A;
-  --primary-active: #D91C36;
-  --primary-light: #FFF0F2;
-  --primary-fade: rgba(255, 36, 66, 0.08);
-  
-  --text-main: #333333;
-  --text-sub: #666666;
-  --text-secondary: #999999;
-  --text-placeholder: #CCCCCC;
-  
-  --border-color: #EEEEEE;
-  --border-hover: #E0E0E0;
-  
-  --radius-xl: 24px;
-  --radius-lg: 16px;
-  --radius-md: 12px;
-  --radius-sm: 8px;
-  
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.1);
-  --shadow-hover: 0 16px 48px rgba(0, 0, 0, 0.08);
-  
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  /* Apple-like light theme */
+  --bg-body: #f5f5f7;
+  --bg-sidebar: rgba(255, 255, 255, 0.78);
+  --bg-card: rgba(255, 255, 255, 0.86);
+  --bg-elevated: rgba(255, 255, 255, 0.92);
+  --bg-glow-1: rgba(10, 132, 255, 0.14);
+  --bg-glow-2: rgba(94, 92, 230, 0.1);
+  --bg-overlay-top: rgba(245, 245, 247, 0.72);
+  --bg-overlay-bottom: rgba(245, 245, 247, 0.84);
+
+  --primary: #0a84ff;
+  --primary-hover: #409cff;
+  --primary-active: #0060df;
+  --primary-light: rgba(10, 132, 255, 0.14);
+  --primary-fade: rgba(10, 132, 255, 0.1);
+
+  --text-main: #1d1d1f;
+  --text-sub: rgba(60, 60, 67, 0.72);
+  --text-secondary: rgba(60, 60, 67, 0.56);
+  --text-placeholder: rgba(60, 60, 67, 0.35);
+
+  --border-color: rgba(60, 60, 67, 0.16);
+  --border-hover: rgba(60, 60, 67, 0.24);
+
+  --radius-xl: 22px;
+  --radius-lg: 18px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+
+  --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.04), 0 8px 20px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.06), 0 18px 44px rgba(0, 0, 0, 0.09);
+  --shadow-lg: 0 10px 34px rgba(0, 0, 0, 0.12);
+  --shadow-hover: 0 12px 40px rgba(0, 0, 0, 0.14);
+
+  --focus-ring: 0 0 0 4px rgba(10, 132, 255, 0.18);
+
   --sidebar-width: 260px;
   --header-height: 64px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-body: #0b0b0f;
+    --bg-sidebar: rgba(28, 28, 30, 0.76);
+    --bg-card: rgba(28, 28, 30, 0.72);
+    --bg-elevated: rgba(44, 44, 46, 0.7);
+    --bg-glow-1: rgba(10, 132, 255, 0.12);
+    --bg-glow-2: rgba(94, 92, 230, 0.1);
+    --bg-overlay-top: rgba(11, 11, 15, 0.68);
+    --bg-overlay-bottom: rgba(11, 11, 15, 0.82);
+
+    --text-main: rgba(235, 235, 245, 0.92);
+    --text-sub: rgba(235, 235, 245, 0.72);
+    --text-secondary: rgba(235, 235, 245, 0.56);
+    --text-placeholder: rgba(235, 235, 245, 0.36);
+
+    --border-color: rgba(84, 84, 88, 0.48);
+    --border-hover: rgba(84, 84, 88, 0.7);
+
+    --shadow-sm: 0 1px 1px rgba(0, 0, 0, 0.35), 0 14px 40px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.4), 0 22px 60px rgba(0, 0, 0, 0.55);
+    --shadow-lg: 0 14px 70px rgba(0, 0, 0, 0.6);
+    --shadow-hover: 0 18px 86px rgba(0, 0, 0, 0.68);
+
+    --focus-ring: 0 0 0 4px rgba(10, 132, 255, 0.28);
+  }
 }

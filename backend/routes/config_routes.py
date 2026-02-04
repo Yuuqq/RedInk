@@ -8,6 +8,7 @@
 """
 
 import logging
+import os
 from pathlib import Path
 import yaml
 from flask import Blueprint, request, jsonify
@@ -181,8 +182,12 @@ def _read_config(path: Path, default: dict) -> dict:
 
 def _write_config(path: Path, config: dict):
     """写入配置文件"""
-    with open(path, 'w', encoding='utf-8') as f:
-        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+    # Atomic write: write to temp file then replace, to avoid corrupting config on crash.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, 'w', encoding='utf-8', newline='\n') as f:
+        yaml.dump(config, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    os.replace(tmp_path, path)
 
 
 def _update_provider_config(config_path: Path, new_data: dict):
@@ -227,7 +232,7 @@ def _clear_config_cache():
     """清除配置缓存"""
     try:
         from backend.config import Config
-        Config._image_providers_config = None
+        Config.reload_config()
     except Exception:
         pass
 
@@ -284,7 +289,7 @@ def _test_provider_connection(provider_type: str, config: dict) -> dict:
     Returns:
         dict: 测试结果
     """
-    test_prompt = "请回复'你好，红墨'"
+    test_prompt = "请回复'你好，CSS Lab'"
 
     if provider_type == 'google_genai':
         return _test_google_genai(config)
@@ -416,7 +421,7 @@ def _test_image_api(config: dict) -> dict:
 
 def _check_response(result_text: str) -> dict:
     """检查响应是否符合预期"""
-    if "你好" in result_text and "红墨" in result_text:
+    if "你好" in result_text and ("CSS Lab" in result_text or "CSSLAB" in result_text or "css lab" in result_text.lower()):
         return {
             "success": True,
             "message": f"连接成功！响应: {result_text[:100]}"

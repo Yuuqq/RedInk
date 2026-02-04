@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { consumeSSE } from './sse'
 
 const API_BASE_URL = '/api'
 
@@ -115,54 +116,12 @@ export async function retryFailedImages(
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('无法读取响应流')
-    }
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (!line.trim()) continue
-
-        const [eventLine, dataLine] = line.split('\n')
-        if (!eventLine || !dataLine) continue
-
-        const eventType = eventLine.replace('event: ', '').trim()
-        const eventData = dataLine.replace('data: ', '').trim()
-
-        try {
-          const data = JSON.parse(eventData)
-
-          switch (eventType) {
-            case 'retry_start':
-              onProgress({ index: -1, status: 'generating', message: data.message })
-              break
-            case 'complete':
-              onComplete(data)
-              break
-            case 'error':
-              onError(data)
-              break
-            case 'retry_finish':
-              onFinish(data)
-              break
-          }
-        } catch (e) {
-          console.error('解析 SSE 数据失败:', e)
-        }
-      }
-    }
+    await consumeSSE(response, {
+      retry_start: (data: any) => onProgress({ index: -1, status: 'generating', message: data?.message }),
+      complete: (data: any) => onComplete(data),
+      error: (data: any) => onError(data),
+      retry_finish: (data: any) => onFinish(data),
+    })
   } catch (error) {
     onStreamError(error as Error)
   }
@@ -657,54 +616,12 @@ export async function generateImagesPost(
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
-    const reader = response.body?.getReader()
-    if (!reader) {
-      throw new Error('无法读取响应流')
-    }
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (!line.trim()) continue
-
-        const [eventLine, dataLine] = line.split('\n')
-        if (!eventLine || !dataLine) continue
-
-        const eventType = eventLine.replace('event: ', '').trim()
-        const eventData = dataLine.replace('data: ', '').trim()
-
-        try {
-          const data = JSON.parse(eventData)
-
-          switch (eventType) {
-            case 'progress':
-              onProgress(data)
-              break
-            case 'complete':
-              onComplete(data)
-              break
-            case 'error':
-              onError(data)
-              break
-            case 'finish':
-              onFinish(data)
-              break
-          }
-        } catch (e) {
-          console.error('解析 SSE 数据失败:', e)
-        }
-      }
-    }
+    await consumeSSE(response, {
+      progress: (data: any) => onProgress(data),
+      complete: (data: any) => onComplete(data),
+      error: (data: any) => onError(data),
+      finish: (data: any) => onFinish(data),
+    })
   } catch (error) {
     onStreamError(error as Error)
   }
@@ -735,6 +652,89 @@ export interface Config {
     active_provider: string
     providers: Record<string, any>
   }
+}
+
+// ==================== 管理面板 API ====================
+
+export interface AdminTask {
+  task_id: string
+  created_at?: number
+  updated_at?: number
+  generated_count: number
+  failed_count: number
+  has_cover: boolean
+}
+
+export interface AdminHealthResponse {
+  success: boolean
+  time?: number
+  platform?: {
+    python: string
+    system: string
+    release: string
+  }
+  providers?: {
+    text: { active_provider?: string; type?: string; model?: string; base_url?: string }
+    image: { active_provider?: string; type?: string; model?: string; base_url?: string }
+  }
+  probes?: Record<string, any>
+  error?: string
+}
+
+export async function getAdminHealth(): Promise<AdminHealthResponse> {
+  const resp = await axios.get(`${API_BASE_URL}/admin/health`)
+  return resp.data
+}
+
+export async function listAdminTasks(): Promise<{ success: boolean; tasks?: AdminTask[]; error?: string }> {
+  const resp = await axios.get(`${API_BASE_URL}/admin/tasks`)
+  return resp.data
+}
+
+export async function cleanupAdminTask(
+  taskId: string,
+  deleteFiles: boolean = false
+): Promise<{ success: boolean; task_id?: string; existed_in_memory?: boolean; deleted_files?: boolean; error?: string }> {
+  const resp = await axios.delete(`${API_BASE_URL}/admin/tasks/${encodeURIComponent(taskId)}`, {
+    params: { delete_files: deleteFiles ? 'true' : 'false' }
+  })
+  return resp.data
+}
+
+export async function getAdminLogs(params?: {
+  offset?: number
+  max_bytes?: number
+}): Promise<{ success: boolean; log_file?: string; offset?: number; next_offset?: number; content?: string; size?: number; exists?: boolean; error?: string }> {
+  const resp = await axios.get(`${API_BASE_URL}/admin/logs`, { params })
+  return resp.data
+}
+
+export function getAdminLogsDownloadUrl(): string {
+  return `${API_BASE_URL}/admin/logs/download`
+}
+
+export async function rotateAdminLogs(): Promise<{ success: boolean; rotated?: boolean; log_file?: string; error?: string }> {
+  const resp = await axios.post(`${API_BASE_URL}/admin/logs/rotate`, {})
+  return resp.data
+}
+
+export async function getAdminHistoryStats(): Promise<{ success: boolean; stats?: any; error?: string }> {
+  const resp = await axios.get(`${API_BASE_URL}/admin/history/stats`)
+  return resp.data
+}
+
+export async function cleanupAdminHistory(params: {
+  scope?: 'orphan' | 'all'
+  delete_orphan_tasks?: boolean
+  older_than_days?: number
+  keep_last_n?: number
+  larger_than_mb?: number
+  dry_run?: boolean
+  confirm_delete_orphans?: string
+  confirm_delete_any?: string
+}): Promise<{ success: boolean; dry_run?: boolean; deleted?: any[]; failed?: any[]; error?: string }> {
+  const resp = await axios.post(`${API_BASE_URL}/admin/history/cleanup`, params)
+  return resp.data
 }
 
 // 获取配置

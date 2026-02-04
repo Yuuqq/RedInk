@@ -312,7 +312,12 @@ export const useGeneratorStore = defineStore('generator', {
       const image = this.images.find(img => img.index === index)
       if (image) {
         image.status = status
-        if (url) image.url = url
+        if (url) {
+          // Add a cache-busting param so the browser refetches even after a previous 404.
+          const timestamp = Date.now()
+          const sep = url.includes('?') ? '&' : '?'
+          image.url = `${url}${sep}t=${timestamp}`
+        }
         if (error) image.error = error
       }
       // 成功完成时增加计数

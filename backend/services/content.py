@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import re
-import yaml
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+from backend.config import Config
 from backend.utils.text_client import get_text_chat_client
 
 logger = logging.getLogger(__name__)
@@ -21,75 +21,15 @@ class ContentService:
 
     def __init__(self):
         logger.debug("初始化 ContentService...")
-        self.text_config = self._load_text_config()
+        self.text_config = Config.load_text_providers_config()
         self.client = self._get_client()
         self.prompt_template = self._load_prompt_template()
         logger.info(f"ContentService 初始化完成，使用服务商: {self.text_config.get('active_provider')}")
 
-    def _load_text_config(self) -> dict:
-        """加载文本生成配置"""
-        config_path = Path(__file__).parent.parent.parent / 'text_providers.yaml'
-        logger.debug(f"加载文本配置: {config_path}")
-
-        if config_path.exists():
-            try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = yaml.safe_load(f) or {}
-                logger.debug(f"文本配置加载成功: active={config.get('active_provider')}")
-                return config
-            except yaml.YAMLError as e:
-                logger.error(f"文本配置 YAML 解析失败: {e}")
-                raise ValueError(
-                    f"文本配置文件格式错误: text_providers.yaml\n"
-                    f"YAML 解析错误: {e}\n"
-                    "解决方案：检查 YAML 缩进和语法"
-                )
-
-        logger.warning("text_providers.yaml 不存在，使用默认配置")
-        return {
-            'active_provider': 'google_gemini',
-            'providers': {
-                'google_gemini': {
-                    'type': 'google_gemini',
-                    'model': 'gemini-2.0-flash-exp',
-                    'temperature': 1.0,
-                    'max_output_tokens': 8000
-                }
-            }
-        }
-
     def _get_client(self):
         """根据配置获取客户端"""
-        active_provider = self.text_config.get('active_provider', 'google_gemini')
-        providers = self.text_config.get('providers', {})
-
-        if not providers:
-            logger.error("未找到任何文本生成服务商配置")
-            raise ValueError(
-                "未找到任何文本生成服务商配置。\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加文本生成服务商\n"
-                "2. 或手动编辑 text_providers.yaml 文件"
-            )
-
-        if active_provider not in providers:
-            available = ', '.join(providers.keys())
-            logger.error(f"文本服务商 [{active_provider}] 不存在，可用: {available}")
-            raise ValueError(
-                f"未找到文本生成服务商配置: {active_provider}\n"
-                f"可用的服务商: {available}\n"
-                "解决方案：在系统设置中选择一个可用的服务商"
-            )
-
-        provider_config = providers.get(active_provider, {})
-
-        if not provider_config.get('api_key'):
-            logger.error(f"文本服务商 [{active_provider}] 未配置 API Key")
-            raise ValueError(
-                f"文本服务商 {active_provider} 未配置 API Key\n"
-                "解决方案：在系统设置页面编辑该服务商，填写 API Key"
-            )
-
+        active_provider = Config.get_active_text_provider()
+        provider_config = Config.get_text_provider_config(active_provider)
         logger.info(f"使用文本服务商: {active_provider} (type={provider_config.get('type')})")
         return get_text_chat_client(provider_config)
 
@@ -156,9 +96,8 @@ class ContentService:
             )
 
             # 从配置中获取模型参数
-            active_provider = self.text_config.get('active_provider', 'google_gemini')
-            providers = self.text_config.get('providers', {})
-            provider_config = providers.get(active_provider, {})
+            active_provider = Config.get_active_text_provider()
+            provider_config = Config.get_text_provider_config(active_provider)
 
             model = provider_config.get('model', 'gemini-2.0-flash-exp')
             temperature = provider_config.get('temperature', 1.0)

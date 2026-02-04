@@ -160,8 +160,8 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 }
 
 .btn-activate:hover:not(:disabled) {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .btn-activate.active {
@@ -222,8 +222,8 @@ const canDelete = computed(() => Object.keys(props.providers).length > 1)
 }
 
 .btn-icon:hover {
-  border-color: var(--primary, #ff2442);
-  color: var(--primary, #ff2442);
+  border-color: var(--primary);
+  color: var(--primary);
   background: rgba(255, 36, 66, 0.05);
 }
 

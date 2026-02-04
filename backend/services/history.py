@@ -8,6 +8,8 @@
 import os
 import json
 import uuid
+import re
+import threading
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -303,14 +305,26 @@ class HistoryService:
         # 删除关联的任务图片目录
         if record.get("images") and record["images"].get("task_id"):
             task_id = record["images"]["task_id"]
-            task_dir = os.path.join(self.history_dir, task_id)
-            if os.path.exists(task_dir) and os.path.isdir(task_dir):
+            # 防止路径遍历/符号链接导致误删任意目录
+            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
                 try:
-                    import shutil
-                    shutil.rmtree(task_dir)
-                    print(f"已删除任务目录: {task_dir}")
+                    base = Path(self.history_dir).resolve()
+                    raw_dir = (Path(self.history_dir) / str(task_id))
+
+                    # Never delete symlinks
+                    if raw_dir.is_symlink():
+                        print(f"跳过符号链接任务目录: {raw_dir}")
+                    else:
+                        resolved = raw_dir.resolve()
+                        resolved.relative_to(base)
+                        if resolved.exists() and resolved.is_dir():
+                            import shutil
+                            shutil.rmtree(str(resolved))
+                            print(f"已删除任务目录: {resolved}")
                 except Exception as e:
-                    print(f"删除任务目录失败: {task_dir}, {e}")
+                    print(f"删除任务目录失败: {task_id}, {e}")
+            else:
+                print(f"任务目录 task_id 不安全，已跳过删除: {task_id}")
 
         # 删除记录 JSON 文件
         record_path = self._get_record_path(record_id)
@@ -599,6 +613,7 @@ class HistoryService:
 
 
 _service_instance = None
+_service_lock = threading.Lock()
 
 
 def get_history_service() -> HistoryService:
@@ -610,5 +625,7 @@ def get_history_service() -> HistoryService:
     """
     global _service_instance
     if _service_instance is None:
-        _service_instance = HistoryService()
+        with _service_lock:
+            if _service_instance is None:
+                _service_instance = HistoryService()
     return _service_instance

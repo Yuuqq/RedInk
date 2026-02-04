@@ -16,7 +16,7 @@
         <div class="section-header">
           <div>
             <h2 class="section-title">文本生成配置</h2>
-            <p class="section-desc">用于生成小红书图文大纲</p>
+            <p class="section-desc">用于生成图文内容大纲</p>
           </div>
           <button class="btn btn-small" @click="openAddTextModal">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -43,7 +43,7 @@
         <div class="section-header">
           <div>
             <h2 class="section-title">图片生成配置</h2>
-            <p class="section-desc">用于生成小红书配图</p>
+            <p class="section-desc">用于生成图文配图</p>
           </div>
           <button class="btn btn-small" @click="openAddImageModal">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -182,14 +182,14 @@ onMounted(() => {
 
 .section-title {
   font-size: 18px;
-  font-weight: 600;
+  font-weight: 650;
   margin-bottom: 4px;
-  color: #1a1a1a;
+  color: var(--text-main);
 }
 
 .section-desc {
   font-size: 14px;
-  color: #666;
+  color: var(--text-sub);
   margin: 0;
 }
 
@@ -209,6 +209,6 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 80px 20px;
-  color: #666;
+  color: var(--text-sub);
 }
 </style>

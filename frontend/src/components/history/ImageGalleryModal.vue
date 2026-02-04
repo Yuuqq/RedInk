@@ -234,7 +234,7 @@ const formattedDate = computed(() => {
 }
 
 .title-expand-btn:hover {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
 }
 
@@ -264,9 +264,9 @@ const formattedDate = computed(() => {
 }
 
 .view-outline-btn:hover {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
-  border-color: var(--primary, #ff2442);
+  border-color: var(--primary);
 }
 
 /* 头部操作区 */
@@ -385,7 +385,7 @@ const formattedDate = computed(() => {
 }
 
 .modal-overlay-btn:hover {
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
   transform: scale(1.05);
 }
@@ -420,7 +420,7 @@ const formattedDate = computed(() => {
 
 .download-link {
   cursor: pointer;
-  color: var(--primary, #ff2442);
+  color: var(--primary);
   transition: opacity 0.2s;
 }
 

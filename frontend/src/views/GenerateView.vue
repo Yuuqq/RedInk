@@ -2,14 +2,14 @@
   <div class="container">
     <div class="page-header">
       <div>
-        <h1 class="page-title">生成结果</h1>
+        <h1 class="page-title">生成图片</h1>
         <p class="page-subtitle">
           <span v-if="isGenerating">正在生成第 {{ store.progress.current + 1 }} / {{ store.progress.total }} 页</span>
           <span v-else-if="hasFailedImages">{{ failedCount }} 张图片生成失败，可点击重试</span>
           <span v-else>全部 {{ store.progress.total }} 张图片生成完成</span>
         </p>
       </div>
-      <div style="display: flex; gap: 10px;">
+      <div class="page-actions">
         <button
           v-if="hasFailedImages && !isGenerating"
           class="btn btn-primary"
@@ -18,16 +18,16 @@
         >
           {{ isRetrying ? '补全中...' : '一键补全失败图片' }}
         </button>
-        <button class="btn" @click="router.push('/outline')" style="border:1px solid var(--border-color)">
+        <button class="btn btn-secondary" @click="router.push('/outline')">
           返回大纲
         </button>
       </div>
     </div>
 
     <div class="card">
-      <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-weight: 600;">生成进度</span>
-        <span style="color: var(--primary); font-weight: 600;">{{ Math.round(progressPercent) }}%</span>
+      <div class="progress-header">
+        <span class="progress-title">生成进度</span>
+        <span class="progress-percent">{{ Math.round(progressPercent) }}%</span>
       </div>
       <div class="progress-container">
         <div class="progress-bar" :style="{ width: progressPercent + '%' }" />
@@ -37,7 +37,7 @@
         {{ error }}
       </div>
 
-      <div class="grid-cols-4" style="margin-top: 40px;">
+      <div class="grid-cols-4 images-grid">
         <div v-for="image in store.images" :key="image.index" class="image-card">
           <!-- 图片展示区域 -->
           <div v-if="image.url && image.status === 'done'" class="image-preview">
@@ -325,6 +325,27 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.progress-header {
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-title {
+  font-weight: 650;
+  color: var(--text-main);
+}
+
+.progress-percent {
+  color: var(--primary);
+  font-weight: 650;
+}
+
+.images-grid {
+  margin-top: 26px;
+}
+
 .image-preview {
   aspect-ratio: 3/4;
   overflow: hidden;
@@ -344,12 +365,14 @@ onMounted(async () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.42);
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
   transition: opacity 0.2s;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 .image-preview:hover .image-overlay {
@@ -361,18 +384,19 @@ onMounted(async () => {
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  background: white;
-  border: none;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 12px;
   cursor: pointer;
   font-size: 13px;
-  color: #333;
-  transition: all 0.2s;
+  color: #1d1d1f;
+  transition: transform 0.2s ease, background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 
 .overlay-btn:hover {
-  background: var(--primary);
-  color: white;
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(255, 255, 255, 0.86);
+  transform: translateY(-1px);
 }
 
 .overlay-btn:disabled {
@@ -382,7 +406,7 @@ onMounted(async () => {
 
 .image-placeholder {
   aspect-ratio: 3/4;
-  background: #f9f9f9;
+  background: rgba(120, 120, 128, 0.10);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -390,17 +414,18 @@ onMounted(async () => {
   gap: 10px;
   flex: 1; /* 填充卡片剩余空间 */
   min-height: 240px; /* 确保有最小高度 */
+  border-top: 1px solid var(--border-color);
 }
 
 .error-placeholder {
-  background: #fff5f5;
+  background: rgba(255, 59, 48, 0.08);
 }
 
 .error-icon {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: #ff4d4f;
+  background: rgba(255, 59, 48, 0.92);
   color: white;
   display: flex;
   align-items: center;
@@ -417,17 +442,17 @@ onMounted(async () => {
 .retry-btn {
   margin-top: 8px;
   padding: 6px 16px;
-  background: var(--primary);
+  background: rgba(10, 132, 255, 0.92);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 10px;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.2s;
+  transition: transform 0.2s ease, background 0.2s ease;
 }
 
 .retry-btn:hover {
-  opacity: 0.9;
+  background: rgba(64, 156, 255, 0.96);
   transform: translateY(-1px);
 }
 
@@ -439,7 +464,7 @@ onMounted(async () => {
 
 .image-footer {
   padding: 12px;
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -457,19 +482,19 @@ onMounted(async () => {
 }
 
 .status-badge.done {
-  background: #E6F7ED;
-  color: #52C41A;
+  background: rgba(52, 199, 89, 0.12);
+  color: #248a3d;
 }
 
 .status-badge.generating,
 .status-badge.retrying {
-  background: #E6F4FF;
-  color: #1890FF;
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--primary);
 }
 
 .status-badge.error {
-  background: #FFF1F0;
-  color: #FF4D4F;
+  background: rgba(255, 59, 48, 0.10);
+  color: #b42318;
 }
 
 .spinner {

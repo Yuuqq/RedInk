@@ -1,20 +1,19 @@
 <template>
-  <div class="container" style="max-width: 1200px;">
+  <div class="container">
 
     <!-- Header Area -->
     <div class="page-header">
       <div>
         <h1 class="page-title">我的创作</h1>
       </div>
-      <div style="display: flex; gap: 10px;">
+      <div class="page-actions">
         <button
-          class="btn"
+          class="btn btn-secondary"
           @click="handleScanAll"
           :disabled="isScanning"
-          style="border: 1px solid var(--border-color);"
         >
           <svg v-if="!isScanning" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          <div v-else class="spinner-small" style="margin-right: 6px;"></div>
+          <div v-else class="spinner-small"></div>
           {{ isScanning ? '同步中...' : '同步历史' }}
         </button>
         <button class="btn btn-primary" @click="router.push('/')">
@@ -29,7 +28,7 @@
 
     <!-- Toolbar: Tabs & Search -->
     <div class="toolbar-wrapper">
-      <div class="tabs-container" style="margin-bottom: 0; border-bottom: none;">
+      <div class="tabs-container history-tabs">
         <div
           class="tab-item"
           :class="{ active: currentTab === 'all' }"
@@ -419,6 +418,7 @@ onMounted(async () => {
   border-radius: 50%;
   animation: spin 1s linear infinite;
   display: inline-block;
+  margin-right: 6px;
 }
 
 @keyframes spin {
@@ -437,6 +437,11 @@ onMounted(async () => {
   padding-bottom: 0;
 }
 
+.history-tabs {
+  margin-bottom: 0;
+  border-bottom: none;
+}
+
 .search-mini {
   position: relative;
   width: 240px;
@@ -449,7 +454,7 @@ onMounted(async () => {
   border-radius: 100px;
   border: 1px solid var(--border-color);
   font-size: 14px;
-  background: white;
+  background: rgba(255, 255, 255, 0.86);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -464,7 +469,7 @@ onMounted(async () => {
   left: 12px;
   top: 50%;
   transform: translateY(-50%);
-  color: #ccc;
+  color: var(--text-secondary);
 }
 
 /* Gallery Grid */
@@ -487,8 +492,8 @@ onMounted(async () => {
 .page-btn {
   padding: 8px 16px;
   border: 1px solid var(--border-color);
-  background: white;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.86);
+  border-radius: 10px;
   cursor: pointer;
 }
 

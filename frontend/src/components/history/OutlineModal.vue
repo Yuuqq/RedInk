@@ -166,12 +166,12 @@ function getPageTypeName(type: string): string {
   min-width: 36px;
   height: 24px;
   padding: 0 8px;
-  background: var(--primary, #ff2442);
+  background: var(--primary);
   color: white;
   border-radius: 4px;
   font-size: 12px;
   font-weight: 700;
-  font-family: 'Inter', sans-serif;
+  font-family: var(--font-mono);
 }
 
 /* 页面类型标识 */

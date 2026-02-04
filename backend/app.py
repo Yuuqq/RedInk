@@ -1,14 +1,82 @@
 import logging
+import os
 import sys
+import ctypes
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from flask import Flask, send_from_directory
+from flask import request as flask_request
 from flask_cors import CORS
 from backend.config import Config
 from backend.routes import register_routes
 
 
+class SafeStreamHandler(logging.StreamHandler):
+    """
+    StreamHandler that won't crash on Windows consoles with non-UTF8 encodings.
+
+    Some environments default to GBK/CP936; emoji in log messages can trigger
+    UnicodeEncodeError and break app startup. This handler downgrades such
+    errors to replacement characters.
+    """
+
+    def emit(self, record):
+        # NOTE: logging.StreamHandler.emit() catches exceptions internally and
+        # calls handleError(), which still prints "Logging error" under
+        # logging.raiseExceptions. We implement our own emit() to avoid that.
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            terminator = getattr(self, "terminator", "\n")
+
+            try:
+                stream.write(msg + terminator)
+            except UnicodeEncodeError:
+                enc = getattr(stream, "encoding", None) or "utf-8"
+                data = (msg + terminator).encode(enc, errors="replace")
+                if hasattr(stream, "buffer"):
+                    stream.buffer.write(data)
+                else:
+                    stream.write(data.decode(enc, errors="replace"))
+
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
+def _force_utf8_console():
+    """
+    Best-effort: force UTF-8 stdout/stderr on Windows to avoid GBK emoji crashes.
+
+    - For cmd.exe/PowerShell legacy consoles, set codepage to 65001.
+    - Reconfigure Python streams to UTF-8.
+
+    If the host console/font doesn't support Unicode, output may still look odd,
+    but the process won't crash on UnicodeEncodeError.
+    """
+    if os.name != "nt":
+        return
+
+    try:
+        # Set Windows console codepage to UTF-8 (process-level).
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:
+        pass
+
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 def setup_logging():
     """配置日志系统"""
+    _force_utf8_console()
+
     # 创建根日志器
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
@@ -17,7 +85,8 @@ def setup_logging():
     root_logger.handlers.clear()
 
     # 控制台处理器 - 详细格式
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Use a safe handler to avoid UnicodeEncodeError on Windows consoles (GBK).
+    console_handler = SafeStreamHandler(sys.stdout)
     console_handler.setLevel(logging.DEBUG)
     console_format = logging.Formatter(
         '\n%(asctime)s | %(levelname)-8s | %(name)s\n'
@@ -26,6 +95,31 @@ def setup_logging():
     )
     console_handler.setFormatter(console_format)
     root_logger.addHandler(console_handler)
+
+    # 文件日志（用于管理面板查看）
+    try:
+        project_root = Path(__file__).parent.parent
+        log_dir = project_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = os.environ.get("REDINK_LOG_FILE") or str(log_dir / "redink.log")
+
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=int(os.environ.get("REDINK_LOG_MAX_BYTES", str(5 * 1024 * 1024))),  # 5MB
+            backupCount=int(os.environ.get("REDINK_LOG_BACKUP_COUNT", "5")),
+            encoding="utf-8"
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_format = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(file_format)
+        root_logger.addHandler(file_handler)
+        root_logger.debug(f"日志文件输出已启用: {log_file}")
+    except Exception as e:
+        # Don't crash startup if file logging can't be enabled.
+        root_logger.warning(f"无法启用文件日志: {e}")
 
     # 设置各模块的日志级别
     logging.getLogger('backend').setLevel(logging.DEBUG)
@@ -38,7 +132,7 @@ def setup_logging():
 def create_app():
     # 设置日志
     logger = setup_logging()
-    logger.info("🚀 正在启动 红墨 AI图文生成器...")
+    logger.info("🚀 正在启动 CSS Lab AI图文生成器...")
 
     # 检查是否存在前端构建产物（Docker 环境）
     frontend_dist = Path(__file__).parent.parent / 'frontend' / 'dist'
@@ -59,7 +153,7 @@ def create_app():
         r"/api/*": {
             "origins": Config.CORS_ORIGINS,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type"],
+            "allow_headers": ["Content-Type", "Authorization"],
         }
     })
 
@@ -78,12 +172,15 @@ def create_app():
         # 处理 Vue Router 的 HTML5 History 模式
         @app.errorhandler(404)
         def fallback(e):
+            # Do not hijack API 404s, otherwise clients get HTML with 200.
+            if flask_request.path.startswith('/api/'):
+                return {"success": False, "error": "Not Found"}, 404
             return send_from_directory(app.static_folder, 'index.html')
     else:
         @app.route('/')
         def index():
             return {
-                "message": "红墨 AI图文生成器 API",
+                "message": "CSS Lab AI图文生成器 API",
                 "version": "0.1.0",
                 "endpoints": {
                     "health": "/api/health",

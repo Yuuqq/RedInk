@@ -13,6 +13,8 @@ import os
 import io
 import zipfile
 import logging
+from pathlib import Path
+from typing import Optional
 from flask import Blueprint, request, jsonify, send_file
 from backend.services.history import get_history_service
 
@@ -444,12 +446,12 @@ def create_history_blueprint():
                     "error": "该记录没有关联的任务图片"
                 }), 404
 
-            # 获取任务目录
-            task_dir = os.path.join(history_service.history_dir, task_id)
-            if not os.path.exists(task_dir):
+            # 获取任务目录（防止路径遍历/符号链接）
+            task_dir = _safe_task_dir(history_service.history_dir, task_id)
+            if not task_dir:
                 return jsonify({
                     "success": False,
-                    "error": f"任务目录不存在：{task_id}"
+                    "error": f"任务目录不存在或路径不安全：{task_id}"
                 }), 404
 
             # 创建内存中的 ZIP 文件
@@ -489,6 +491,10 @@ def _create_images_zip(task_dir: str) -> io.BytesIO:
     """
     memory_file = io.BytesIO()
 
+    task_path = Path(task_dir).resolve()
+    if Path(task_dir).is_symlink():
+        raise ValueError("任务目录为符号链接，已拒绝打包")
+
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
         # 遍历任务目录中的所有图片（排除缩略图）
         for filename in os.listdir(task_dir):
@@ -497,7 +503,23 @@ def _create_images_zip(task_dir: str) -> io.BytesIO:
                 continue
 
             if filename.endswith(('.png', '.jpg', '.jpeg')):
-                file_path = os.path.join(task_dir, filename)
+                file_path = (task_path / filename)
+
+                # 跳过符号链接
+                try:
+                    if file_path.is_symlink():
+                        continue
+                except Exception:
+                    continue
+
+                # 确保在 task_dir 内
+                try:
+                    file_path.resolve().relative_to(task_path)
+                except Exception:
+                    continue
+
+                if not file_path.exists() or not file_path.is_file():
+                    continue
 
                 # 生成归档文件名（page_N.png 格式）
                 try:
@@ -506,7 +528,7 @@ def _create_images_zip(task_dir: str) -> io.BytesIO:
                 except ValueError:
                     archive_name = filename
 
-                zf.write(file_path, archive_name)
+                zf.write(str(file_path), archive_name)
 
     # 将指针移到开始位置
     memory_file.seek(0)
@@ -525,8 +547,39 @@ def _sanitize_filename(title: str) -> str:
     """
     # 只保留字母、数字、空格、连字符和下划线
     safe_title = "".join(
-        c for c in title
-        if c.isalnum() or c in (' ', '-', '_', '\u4e00-\u9fff')
+        c for c in (title or "")
+        if c.isalnum() or c in (' ', '-', '_') or ('\u4e00' <= c <= '\u9fff')
     ).strip()
 
     return safe_title if safe_title else 'images'
+
+
+def _safe_task_dir(history_root: str, task_id: str) -> Optional[str]:
+    """
+    防止路径遍历/符号链接：
+    - task_id 只能是安全字符
+    - resolve 后必须在 history_root 内
+    - 目录不能是 symlink
+    """
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", task_id or ""):
+        return None
+
+    base = Path(history_root).resolve()
+    target = (base / task_id).resolve()
+    try:
+        target.relative_to(base)
+    except Exception:
+        return None
+
+    try:
+        if (base / task_id).is_symlink():
+            return None
+    except Exception:
+        return None
+
+    if not target.exists() or not target.is_dir():
+        return None
+
+    return str(target)

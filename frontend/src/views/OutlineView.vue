@@ -1,16 +1,16 @@
 <template>
-  <div class="container" style="max-width: 100%;">
-    <div class="page-header" style="max-width: 1200px; margin: 0 auto 30px auto;">
+  <div class="container container-wide">
+    <div class="page-header">
       <div>
         <h1 class="page-title">编辑大纲</h1>
         <p class="page-subtitle">
           调整页面顺序，修改文案，打造完美内容
-          <span v-if="isSaving" class="save-indicator saving">保存中...</span>
-          <span v-else class="save-indicator saved">已保存</span>
+          <span v-if="isSaving" class="pill pill-info">保存中...</span>
+          <span v-else class="pill pill-success">已保存</span>
         </p>
       </div>
-      <div style="display: flex; gap: 12px;">
-        <button class="btn btn-secondary" @click="goBack" style="background: white; border: 1px solid var(--border-color);">
+      <div class="page-actions">
+        <button class="btn btn-secondary" @click="goBack">
           上一步
         </button>
         <button class="btn btn-primary" @click="startGeneration">
@@ -35,12 +35,12 @@
         <div class="card-top-bar">
           <div class="page-info">
              <span class="page-number">P{{ idx + 1 }}</span>
-             <span class="page-type" :class="page.type">{{ getPageTypeName(page.type) }}</span>
+             <span class="pill page-type" :class="page.type">{{ getPageTypeName(page.type) }}</span>
           </div>
           
           <div class="card-controls">
             <div class="drag-handle" title="拖拽排序">
-               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
+               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="9" cy="5" r="1"></circle><circle cx="9" cy="19" r="1"></circle><circle cx="15" cy="12" r="1"></circle><circle cx="15" cy="5" r="1"></circle><circle cx="15" cy="19" r="1"></circle></svg>
             </div>
             <button class="icon-btn" @click="deletePage(idx)" title="删除此页">
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
@@ -67,7 +67,7 @@
       </div>
     </div>
     
-    <div style="height: 100px;"></div>
+    <div class="page-bottom-spacer"></div>
   </div>
 </template>
 
@@ -267,64 +267,35 @@ watch(
 </script>
 
 <style scoped>
-/* 保存状态指示器 */
-.save-indicator {
-  margin-left: 12px;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 2px 8px;
-  border-radius: 4px;
-  transition: all 0.3s ease;
-}
-
-.save-indicator.saving {
-  color: #1890ff;
-  background: #e6f7ff;
-  border: 1px solid #91d5ff;
-}
-
-.save-indicator.saved {
-  color: #52c41a;
-  background: #f6ffed;
-  border: 1px solid #b7eb8f;
-  opacity: 0.7;
-}
-
 /* 网格布局 */
 .outline-grid {
   display: grid;
-  /* 响应式列：最小宽度 280px，自动填充 */
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 24px;
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 0 20px;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
 }
 
 .outline-card {
   display: flex;
   flex-direction: column;
-  padding: 16px; /* 减小内边距 */
-  transition: all 0.2s ease;
-  border: none;
-  border-radius: 8px; /* 较小的圆角 */
-  background: white;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-  /* 保持一定的长宽比感，虽然高度自适应，但由于 flex column 和内容撑开，
-     这里设置一个 min-height 让它看起来像个竖向卡片 */
-  min-height: 360px; 
+  padding: 18px;
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  min-height: 360px;
   position: relative;
 }
 
 .outline-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
   z-index: 10;
 }
 
 .outline-card.dragging-over {
-  border: 2px dashed var(--primary);
-  opacity: 0.8;
+  border: 1px dashed rgba(10, 132, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.12) inset, var(--shadow-sm);
 }
 
 /* 顶部栏 */
@@ -334,7 +305,7 @@ watch(
   align-items: center;
   margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .page-info {
@@ -346,45 +317,49 @@ watch(
 .page-number {
   font-size: 14px;
   font-weight: 700;
-  color: #ccc;
-  font-family: 'Inter', sans-serif;
+  color: var(--text-placeholder);
+  font-family: var(--font-mono);
 }
 
 .page-type {
   font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  padding: 3px 10px;
+  text-transform: none;
+  letter-spacing: -0.01em;
 }
-.page-type.cover { color: #FF4D4F; background: #FFF1F0; }
-.page-type.content { color: #8c8c8c; background: #f5f5f5; }
-.page-type.summary { color: #52C41A; background: #F6FFED; }
+.page-type.cover { background: rgba(255, 59, 48, 0.10); border-color: rgba(255, 59, 48, 0.18); color: #b42318; }
+.page-type.content { background: rgba(120, 120, 128, 0.12); border-color: rgba(120, 120, 128, 0.18); color: var(--text-sub); }
+.page-type.summary { background: rgba(52, 199, 89, 0.12); border-color: rgba(52, 199, 89, 0.22); color: #248a3d; }
 
 .card-controls {
   display: flex;
   gap: 8px;
-  opacity: 0.4;
+  opacity: 0.5;
   transition: opacity 0.2s;
 }
 .outline-card:hover .card-controls { opacity: 1; }
 
 .drag-handle {
   cursor: grab;
-  padding: 2px;
+  padding: 4px;
+  color: var(--text-secondary);
 }
 .drag-handle:active { cursor: grabbing; }
 
 .icon-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: #999;
-  padding: 2px;
-  transition: color 0.2s;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
 }
-.icon-btn:hover { color: #FF4D4F; }
+.icon-btn:hover {
+  background: rgba(255, 59, 48, 0.10);
+  color: #b42318;
+  border-color: rgba(255, 59, 48, 0.16);
+}
 
 /* 文本区域 - 核心 */
 .textarea-paper {
@@ -393,9 +368,9 @@ watch(
   border: none;
   background: transparent;
   padding: 0;
-  font-size: 16px; /* 更大的字号 */
-  line-height: 1.7; /* 舒适行高 */
-  color: #333;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-main);
   resize: none; /* 禁止手动拉伸，保持卡片整体感 */
   font-family: inherit;
   margin-bottom: 10px;
@@ -408,13 +383,13 @@ watch(
 .word-count {
   text-align: right;
   font-size: 11px;
-  color: #ddd;
+  color: var(--text-placeholder);
   margin-top: auto;
 }
 
 /* 添加卡片 */
 .add-card-dashed {
-  border: 2px dashed #eee;
+  border: 1px dashed rgba(60, 60, 67, 0.22);
   background: transparent;
   box-shadow: none;
   display: flex;
@@ -422,14 +397,14 @@ watch(
   justify-content: center;
   cursor: pointer;
   min-height: 360px;
-  color: #ccc;
+  color: var(--text-secondary);
   transition: all 0.2s;
 }
 
 .add-card-dashed:hover {
-  border-color: var(--primary);
+  border-color: rgba(10, 132, 255, 0.42);
   color: var(--primary);
-  background: rgba(255, 36, 66, 0.02);
+  background: rgba(10, 132, 255, 0.06);
 }
 
 .add-content {
@@ -440,5 +415,9 @@ watch(
   font-size: 32px;
   font-weight: 300;
   margin-bottom: 8px;
+}
+
+.page-bottom-spacer {
+  height: 84px;
 }
 </style>

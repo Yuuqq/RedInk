@@ -280,8 +280,32 @@ class ImageApiGenerator(ImageGeneratorBase):
         # 解析响应
         if "choices" in result and len(result["choices"]) > 0:
             choice = result["choices"][0]
-            if "message" in choice and "content" in choice["message"]:
-                content = choice["message"]["content"]
+            if "message" in choice and isinstance(choice["message"], dict):
+                message = choice["message"]
+
+                # 0) Some OpenAI-compatible proxies return images in message.images
+                images = message.get("images")
+                if isinstance(images, list) and images:
+                    first = images[0] or {}
+                    image_url = None
+                    if isinstance(first, dict):
+                        # {"type":"image_url","image_url":{"url":"..."}}
+                        if isinstance(first.get("image_url"), dict):
+                            image_url = first["image_url"].get("url")
+                        # {"url":"..."} (fallback)
+                        if not image_url:
+                            image_url = first.get("url")
+
+                    if isinstance(image_url, str) and image_url:
+                        if image_url.startswith("data:image"):
+                            logger.info("检测到 message.images Base64 图片数据")
+                            base64_data = image_url.split(",", 1)[1]
+                            return base64.b64decode(base64_data)
+                        if image_url.startswith("http://") or image_url.startswith("https://"):
+                            logger.info("检测到 message.images 图片 URL")
+                            return self._download_image(image_url.strip())
+
+                content = message.get("content")
 
                 if isinstance(content, str):
                     # Markdown 图片链接: ![xxx](url)

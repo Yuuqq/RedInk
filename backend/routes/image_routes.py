@@ -13,6 +13,8 @@ import os
 import json
 import base64
 import logging
+import re
+from pathlib import Path
 from flask import Blueprint, request, jsonify, Response, send_file
 from backend.services.image import get_image_service
 from .utils import log_request, log_error
@@ -23,6 +25,38 @@ logger = logging.getLogger(__name__)
 def create_image_blueprint():
     """创建图片路由蓝图（工厂函数，支持多次调用）"""
     image_bp = Blueprint('image', __name__)
+
+    def _safe_image_path(history_root: Path, task_id: str, filename: str) -> Path | None:
+        """
+        防止路径遍历：确保最终路径在 history_root 内，且只允许预期文件名。
+
+        仅允许：{index}.png 或 thumb_{index}.png
+        """
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", task_id or ""):
+            return None
+
+        # NOTE: use single backslashes in raw regex. `\\d` would match the literal string "\d".
+        if not re.fullmatch(r"(thumb_)?\d+\.png", filename or ""):
+            return None
+
+        base = history_root.resolve()
+        target = (base / task_id / filename).resolve()
+        try:
+            target.relative_to(base)
+        except Exception:
+            return None
+
+        # Never serve symlinks
+        try:
+            if target.is_symlink():
+                return None
+        except Exception:
+            return None
+
+        if not target.exists() or not target.is_file():
+            return None
+
+        return target
 
     # ==================== 图片生成 ====================
 
@@ -126,30 +160,22 @@ def create_image_blueprint():
             # 检查是否请求缩略图
             thumbnail = request.args.get('thumbnail', 'true').lower() == 'true'
 
-            # 构建 history 目录路径
-            history_root = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "history"
-            )
+            history_root = Path(__file__).parent.parent.parent / "history"
 
             if thumbnail:
-                # 尝试返回缩略图
                 thumb_filename = f"thumb_{filename}"
-                thumb_filepath = os.path.join(history_root, task_id, thumb_filename)
+                safe_thumb = _safe_image_path(history_root, task_id, thumb_filename)
+                if safe_thumb:
+                    return send_file(str(safe_thumb), mimetype='image/png')
 
-                if os.path.exists(thumb_filepath):
-                    return send_file(thumb_filepath, mimetype='image/png')
-
-            # 返回原图
-            filepath = os.path.join(history_root, task_id, filename)
-
-            if not os.path.exists(filepath):
+            safe_file = _safe_image_path(history_root, task_id, filename)
+            if not safe_file:
                 return jsonify({
                     "success": False,
-                    "error": f"图片不存在：{task_id}/{filename}"
+                    "error": f"图片不存在或路径不安全：{task_id}/{filename}"
                 }), 404
 
-            return send_file(filepath, mimetype='image/png')
+            return send_file(str(safe_file), mimetype='image/png')
 
         except Exception as e:
             log_error('/images', e)

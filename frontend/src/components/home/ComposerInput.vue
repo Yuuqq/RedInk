@@ -5,7 +5,7 @@
     <div class="composer-input-wrapper">
       <div class="search-icon-static">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M21 21L16.65 16.65M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="#999" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M21 21L16.65 16.65M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <textarea
@@ -43,7 +43,7 @@
     <!-- 工具栏 -->
     <div class="composer-toolbar">
       <div class="toolbar-left">
-        <label class="tool-btn" :class="{ 'active': uploadedImages.length > 0 }" title="上传参考图">
+        <label class="tool-btn upload-pill" :class="{ 'active': uploadedImages.length > 0, 'disabled': loading }" title="上传参考图">
           <input
             type="file"
             accept="image/*"
@@ -57,7 +57,8 @@
             <circle cx="8.5" cy="8.5" r="1.5"></circle>
             <polyline points="21 15 16 10 5 21"></polyline>
           </svg>
-          <span v-if="uploadedImages.length > 0" class="badge-count">{{ uploadedImages.length }}</span>
+          <span class="upload-pill-label">参考图</span>
+          <span v-if="uploadedImages.length > 0" class="badge-count">{{ uploadedImages.length }}/5</span>
         </label>
       </div>
       <div class="toolbar-right">
@@ -194,6 +195,10 @@ function clearPreviews() {
   uploadedImages.value = []
 }
 
+function focus() {
+  textareaRef.value?.focus()
+}
+
 // 组件卸载时清理
 onUnmounted(() => {
   clearPreviews()
@@ -201,18 +206,23 @@ onUnmounted(() => {
 
 // 暴露方法给父组件
 defineExpose({
-  clearPreviews
+  clearPreviews,
+  focus
 })
 </script>
 
 <style scoped>
 /* 组合框容器 */
 .composer-container {
-  background: white;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: transparent;
+  border-radius: 18px;
+  padding: 0;
+  box-shadow: none;
+  border: none;
+}
+
+.composer-container:focus-within {
+  outline: none;
 }
 
 /* 输入区域 */
@@ -220,12 +230,31 @@ defineExpose({
   display: flex;
   align-items: flex-start;
   gap: 12px;
+  padding: 14px 14px 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.60),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 4px 24px rgba(0, 0, 0, 0.04);
+  backdrop-filter: saturate(180%) blur(26px);
+  -webkit-backdrop-filter: saturate(180%) blur(26px);
+  transition: background 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.composer-container:focus-within .composer-input-wrapper {
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.74),
+    inset 0 0 0 1px rgba(10, 132, 255, 0.36),
+    0 0 0 3px rgba(10, 132, 255, 0.12),
+    0 10px 34px rgba(0, 0, 0, 0.06);
 }
 
 .search-icon-static {
   flex-shrink: 0;
-  padding-top: 8px;
-  color: #999;
+  padding-top: 10px;
+  color: var(--text-secondary);
 }
 
 .composer-textarea {
@@ -235,41 +264,49 @@ defineExpose({
   font-size: 16px;
   line-height: 1.6;
   resize: none;
-  min-height: 44px;
+  min-height: 64px;
   max-height: 200px;
-  padding: 8px 0;
+  padding: 8px 0 8px;
   font-family: inherit;
-  color: var(--text-main, #1a1a1a);
+  color: var(--text-main);
+  background: transparent;
+  letter-spacing: -0.01em;
 }
 
 .composer-textarea::placeholder {
-  color: #999;
+  color: var(--text-placeholder);
 }
 
 .composer-textarea:disabled {
   background: transparent;
-  color: #999;
+  color: var(--text-placeholder);
 }
 
 /* 已上传图片预览 */
 .uploaded-images-preview {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 16px;
-  background: #fafafa;
-  border-radius: 12px;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(120, 120, 128, 0.10);
+  border-radius: 16px;
   align-items: center;
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
 }
 
 .uploaded-image-item {
   position: relative;
   width: 60px;
   height: 60px;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.04),
+    0 10px 24px rgba(0, 0, 0, 0.10);
+  border: 1px solid rgba(60, 60, 67, 0.14);
 }
 
 .uploaded-image-item img {
@@ -285,7 +322,7 @@ defineExpose({
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(28, 28, 30, 0.52);
   border: none;
   cursor: pointer;
   display: flex;
@@ -293,7 +330,9 @@ defineExpose({
   justify-content: center;
   color: white;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.18s ease, background 0.18s ease;
+  backdrop-filter: saturate(180%) blur(10px);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
 }
 
 .uploaded-image-item:hover .remove-image-btn {
@@ -301,13 +340,13 @@ defineExpose({
 }
 
 .remove-image-btn:hover {
-  background: var(--primary, #ff2442);
+  background: rgba(10, 132, 255, 0.85);
 }
 
 .upload-hint {
   flex: 1;
   font-size: 12px;
-  color: var(--text-sub, #666);
+  color: var(--text-sub);
   text-align: right;
 }
 
@@ -318,7 +357,7 @@ defineExpose({
   align-items: center;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #f0f0f0;
+  border-top: none;
 }
 
 .toolbar-left {
@@ -331,48 +370,79 @@ defineExpose({
   align-items: center;
   justify-content: center;
   position: relative;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: #f5f5f5;
-  border: none;
+  height: 36px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid rgba(60, 60, 67, 0.14);
   cursor: pointer;
-  color: #666;
-  transition: all 0.2s;
+  color: var(--text-sub);
+  transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+  padding: 0 12px;
+  gap: 8px;
 }
 
 .tool-btn:hover {
-  background: #eee;
-  color: var(--primary, #ff2442);
+  background: rgba(120, 120, 128, 0.10);
+  color: var(--text-main);
+  border-color: rgba(60, 60, 67, 0.20);
 }
 
 .tool-btn.active {
-  background: rgba(255, 36, 66, 0.1);
-  color: var(--primary, #ff2442);
+  background: rgba(10, 132, 255, 0.12);
+  color: var(--primary);
+  border-color: rgba(10, 132, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.12);
+}
+
+.tool-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.upload-pill {
+  border-radius: 10px;
+  min-width: 172px;
+  height: 40px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  background: rgba(120, 120, 128, 0.08);
+}
+
+.upload-pill .badge-count {
+  margin-left: auto;
+}
+
+.tool-btn.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 .badge-count {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 18px;
-  height: 18px;
-  background: var(--primary, #ff2442);
-  color: white;
-  border-radius: 9px;
-  font-size: 11px;
-  font-weight: 600;
-  display: flex;
+  height: 20px;
+  padding: 0 8px;
+  background: rgba(10, 132, 255, 0.16);
+  color: var(--primary);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 650;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 4px;
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.14);
+}
+
+.upload-pill-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 /* 生成按钮 */
 .generate-btn {
   padding: 10px 24px;
   font-size: 15px;
-  border-radius: 100px;
+  border-radius: 14px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -396,6 +466,64 @@ defineExpose({
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 900px) {
+  .composer-textarea {
+    font-size: 15px;
+    min-height: 58px;
+  }
+
+  .uploaded-images-preview {
+    padding: 12px;
+  }
+
+  .upload-hint {
+    width: 100%;
+    flex: 0 0 100%;
+    text-align: left;
+    margin-top: 6px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .composer-input-wrapper {
+    background: rgba(44, 44, 46, 0.26);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+      0 10px 34px rgba(0, 0, 0, 0.34);
+  }
+
+  .composer-container:focus-within .composer-input-wrapper {
+    background: rgba(44, 44, 46, 0.32);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.10),
+      inset 0 0 0 1px rgba(10, 132, 255, 0.32),
+      0 0 0 3px rgba(10, 132, 255, 0.22),
+      0 18px 56px rgba(0, 0, 0, 0.46);
+  }
+
+  .uploaded-images-preview {
+    background: rgba(235, 235, 245, 0.06);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .tool-btn {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.10);
+    color: rgba(235, 235, 245, 0.72);
+  }
+
+  .upload-pill {
+    background: rgba(235, 235, 245, 0.06);
+  }
+
+  .tool-btn:hover {
+    background: rgba(235, 235, 245, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+    color: rgba(235, 235, 245, 0.90);
   }
 }
 </style>

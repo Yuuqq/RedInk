@@ -7,13 +7,14 @@
 }
 
 .stat-box {
-  background: white;
+  background: var(--bg-card);
   padding: 24px;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   gap: 20px;
   box-shadow: var(--shadow-sm);
+  border: 1px solid rgba(60, 60, 67, 0.12);
 }
 
 .stat-icon-circle {
@@ -26,9 +27,9 @@
   font-size: 24px;
 }
 
-.stat-icon-circle.blue { background: #E6F7FF; color: #1890FF; }
-.stat-icon-circle.green { background: #F6FFED; color: #52C41A; }
-.stat-icon-circle.orange { background: #FFF7E6; color: #FA8C16; }
+.stat-icon-circle.blue { background: rgba(10, 132, 255, 0.12); color: var(--primary); }
+.stat-icon-circle.green { background: rgba(52, 199, 89, 0.12); color: #248a3d; }
+.stat-icon-circle.orange { background: rgba(255, 159, 10, 0.12); color: #b36200; }
 
 .stat-content h4 {
   font-size: 14px;
@@ -62,16 +63,16 @@
 .search-mini input {
   width: 100%;
   padding: 8px 12px 8px 36px;
-  border-radius: 100px;
+  border-radius: 12px;
   border: 1px solid var(--border-color);
   font-size: 14px;
-  background: white;
+  background: rgba(255, 255, 255, 0.9);
   transition: all 0.2s;
 }
 .search-mini input:focus {
   border-color: var(--primary);
   outline: none;
-  box-shadow: 0 0 0 3px var(--primary-light);
+  box-shadow: var(--focus-ring);
 }
 
 .search-mini .icon {
@@ -91,10 +92,10 @@
 }
 
 .gallery-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid rgba(0,0,0,0.04);
+  border: 1px solid rgba(60, 60, 67, 0.12);
   transition: all 0.2s;
   position: relative;
 }
@@ -156,7 +157,7 @@
 
 .overlay-btn {
   padding: 8px 24px;
-  border-radius: 100px;
+  border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.8);
   background: rgba(255,255,255,0.2);
   color: white;
@@ -166,7 +167,7 @@
 }
 
 .overlay-btn:hover {
-  background: white;
+  background: rgba(255, 255, 255, 0.92);
   color: var(--text-main);
 }
 
@@ -233,8 +234,8 @@
   border-radius: 4px;
 }
 .more-btn:hover {
-  background: #fee;
-  color: #ff4d4f;
+  background: rgba(255, 59, 48, 0.08);
+  color: #b42318;
 }
 
 /* Pagination */
@@ -249,8 +250,8 @@
 .page-btn {
   padding: 8px 16px;
   border: 1px solid var(--border-color);
-  background: white;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
   cursor: pointer;
 }
 .page-btn:disabled { opacity: 0.5; cursor: not-allowed; }

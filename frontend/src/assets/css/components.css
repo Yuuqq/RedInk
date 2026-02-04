@@ -2,17 +2,17 @@
 .card {
   background: var(--bg-card);
   border-radius: var(--radius-xl);
-  padding: 32px;
+  padding: 28px;
   box-shadow: var(--shadow-sm);
   margin-bottom: 24px;
-  border: 1px solid rgba(0,0,0,0.02);
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  border: 1px solid rgba(60, 60, 67, 0.12);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background 0.25s ease;
   min-width: 0; /* Critical: prevents grid blowout */
 }
 
 .card:hover {
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 /* 按钮 */
@@ -20,33 +20,80 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 24px;
-  border-radius: 50px; /* Pill shape */
+  padding: 10px 14px;
+  border-radius: 12px;
   font-weight: 600;
-  font-size: 16px;
+  font-size: 14px;
   cursor: pointer;
-  transition: all 0.3s ease;
-  border: none;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  border: 1px solid transparent;
   outline: none;
   gap: 8px;
   user-select: none;
+  background: rgba(120, 120, 128, 0.12);
+  color: var(--text-main);
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: rgba(120, 120, 128, 0.12);
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: rgba(120, 120, 128, 0.18);
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.icon-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(120, 120, 128, 0.18);
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary) 0%, #FF5C72 100%);
+  background: linear-gradient(180deg, rgba(10, 132, 255, 0.95) 0%, rgba(10, 132, 255, 0.85) 100%);
   color: white;
-  box-shadow: 0 4px 12px rgba(255, 36, 66, 0.3);
+  box-shadow: 0 10px 22px rgba(10, 132, 255, 0.22);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #FF3B55 0%, #FF7A8C 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(255, 36, 66, 0.4);
+  background: linear-gradient(180deg, rgba(64, 156, 255, 0.98) 0%, rgba(10, 132, 255, 0.88) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(10, 132, 255, 0.28);
 }
 
 .btn-primary:active {
   transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(255, 36, 66, 0.3);
+  box-shadow: 0 8px 18px rgba(10, 132, 255, 0.22);
 }
 
 .btn-primary:disabled {
@@ -54,26 +101,27 @@
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
-  filter: grayscale(20%);
+  filter: grayscale(10%);
 }
 
 .btn-secondary {
-  background: white;
+  background: rgba(255, 255, 255, 0.7);
   color: var(--text-main);
-  border: 1px solid #d1d5db;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #f9fafb;
-  border-color: #9ca3af;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+  border-color: var(--border-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.08);
 }
 
 .btn-secondary:active {
   transform: translateY(0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.06);
 }
 
 .btn-secondary:disabled {
@@ -86,20 +134,20 @@
 /* 通用输入框 (旧版保留，以防万一) */
 .input {
   width: 100%;
-  padding: 20px 32px;
-  background: white;
-  border: 2px solid transparent;
-  border-radius: 100px;
-  font-size: 17px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  font-size: 15px;
   color: var(--text-main);
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
 }
 
 .input:focus {
   border-color: var(--primary);
-  background: white;
-  box-shadow: 0 8px 24px rgba(255, 36, 66, 0.12);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--focus-ring);
   outline: none;
 }
 
@@ -129,11 +177,11 @@
 }
 
 .tag:hover {
-  background: white;
+  background: rgba(255, 255, 255, 0.92);
   border-color: var(--primary);
   color: var(--primary);
-  box-shadow: 0 4px 12px rgba(255, 36, 66, 0.1);
-  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
 }
 
 /* Tabs */
@@ -174,6 +222,45 @@
   border-radius: 2px 2px 0 0;
 }
 
+/* Pills / Badges */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border: 1px solid rgba(60, 60, 67, 0.16);
+  background: rgba(120, 120, 128, 0.10);
+  color: var(--text-sub);
+}
+
+.pill-info {
+  background: rgba(10, 132, 255, 0.12);
+  border-color: rgba(10, 132, 255, 0.20);
+  color: var(--primary);
+}
+
+.pill-success {
+  background: rgba(52, 199, 89, 0.12);
+  border-color: rgba(52, 199, 89, 0.22);
+  color: #248a3d;
+}
+
+.pill-warning {
+  background: rgba(255, 159, 10, 0.12);
+  border-color: rgba(255, 159, 10, 0.22);
+  color: #b36200;
+}
+
+.pill-danger {
+  background: rgba(255, 59, 48, 0.10);
+  border-color: rgba(255, 59, 48, 0.18);
+  color: #b42318;
+}
+
 /* 图标工具类 */
 .icon-xs {
   width: 14px;
@@ -187,18 +274,18 @@
 .spinner {
   width: 24px;
   height: 24px;
-  border: 3px solid rgba(255,255,255,0.3);
+  border: 3px solid rgba(10, 132, 255, 0.18);
   border-radius: 50%;
-  border-top-color: white;
+  border-top-color: var(--primary);
   animation: spin 1s ease-in-out infinite;
 }
 
 .spinner-sm {
   width: 18px;
   height: 18px;
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 2px solid rgba(10, 132, 255, 0.18);
   border-radius: 50%;
-  border-top-color: white;
+  border-top-color: var(--primary);
   animation: spin 1s ease-in-out infinite;
 }
 
@@ -209,7 +296,7 @@
 /* 进度条 */
 .progress-container {
   width: 100%;
-  background: #F0F0F0;
+  background: rgba(120, 120, 128, 0.12);
   border-radius: 100px;
   height: 8px;
   overflow: hidden;
@@ -224,9 +311,9 @@
 
 /* 错误提示 */
 .error-msg {
-  background: #FFF2F0;
-  border: 1px solid #FFCCC7;
-  color: #FF4D4F;
+  background: rgba(255, 59, 48, 0.08);
+  border: 1px solid rgba(255, 59, 48, 0.18);
+  color: #b42318;
   padding: 12px 16px;
   border-radius: var(--radius-sm);
   font-size: 14px;
@@ -248,10 +335,10 @@
 
 /* 图片卡片统一样式 - 用于生成页面和结果页面 */
 .image-card {
-  background: white;
+  background: var(--bg-card);
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid #f0f0f0;
+  border: 1px solid var(--border-color);
   transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
@@ -260,8 +347,8 @@
 }
 
 .image-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 /* 全屏模态框 */
@@ -276,18 +363,19 @@
   padding: 40px;
 }
 .modal-body {
-  background: white;
+  background: var(--bg-elevated);
   width: 100%;
   max-width: 1000px;
   height: 90vh;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border: 1px solid var(--border-color);
 }
 .modal-header {
   padding: 20px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
