@@ -4,6 +4,8 @@
 
 ## CSS Lab - AI图文生成器
 
+> 说明：本项目为 **基于 RedInk 的二次开发/改造版本**（UI 视觉、管理面板、CLIProxyAPI 接入、历史/日志管理等均有较大调整）。
+
 <img src="images/showcase-grid.png" alt="生成效果展示" width="700" style="border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.12);"/>
 
 <sub>*AI 驱动，风格统一，文字准确*</sub>
@@ -278,6 +280,12 @@ providers:
 
 如果这个项目对你有帮助,欢迎给个 Star ⭐
 
+
+---
+
+## 🙏 致谢与来源
+
+- 本项目基于 **RedInk** 项目进行二次开发与改造，感谢原项目作者与社区贡献者。
 
 ---
 
