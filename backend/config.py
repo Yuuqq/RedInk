@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import copy
 import yaml
@@ -8,11 +9,18 @@ logger = logging.getLogger(__name__)
 
 
 class Config:
-    DEBUG = True
-    HOST = '0.0.0.0'
-    PORT = 12398
-    CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:3000']
-    OUTPUT_DIR = 'output'
+    DEBUG = os.environ.get('REDINK_DEBUG', 'false').lower() in ('true', '1', 'yes')
+    HOST = os.environ.get('REDINK_HOST', '0.0.0.0')
+    PORT = int(os.environ.get('REDINK_PORT', '12398'))
+    CORS_ORIGINS = [
+        origin.strip()
+        for origin in os.environ.get(
+            'REDINK_CORS_ORIGINS',
+            'http://localhost:5173,http://localhost:3000'
+        ).split(',')
+        if origin.strip()
+    ]
+    OUTPUT_DIR = os.environ.get('REDINK_OUTPUT_DIR', 'output')
 
     _image_providers_config = None
     _text_providers_config = None

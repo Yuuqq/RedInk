@@ -72,7 +72,6 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
-test_*.py
 debug_*.py
 
 # Dev notes

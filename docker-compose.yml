@@ -12,4 +12,8 @@ services:
       # 可选：挂载自定义配置文件
       # - ./text_providers.yaml:/app/text_providers.yaml
       # - ./image_providers.yaml:/app/image_providers.yaml
+    environment:
+      - REDINK_AUTH_TOKEN=${REDINK_AUTH_TOKEN:-}
+      - REDINK_RATE_LIMIT=${REDINK_RATE_LIMIT:-60 per minute}
+      - REDINK_DEBUG=${REDINK_DEBUG:-false}
     restart: unless-stopped

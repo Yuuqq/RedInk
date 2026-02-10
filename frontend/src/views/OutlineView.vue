@@ -103,12 +103,12 @@ const onDragStart = (e: DragEvent, index: number) => {
   }
 }
 
-const onDragOver = (e: DragEvent, index: number) => {
+const onDragOver = (_e: DragEvent, index: number) => {
   if (draggedIndex.value === index) return
   dragOverIndex.value = index
 }
 
-const onDrop = (e: DragEvent, index: number) => {
+const onDrop = (_e: DragEvent, index: number) => {
   dragOverIndex.value = null
   if (draggedIndex.value !== null && draggedIndex.value !== index) {
     store.movePage(draggedIndex.value, index)

@@ -228,7 +228,7 @@ async function loadRecord(id: string) {
     store.setRecordId(res.record.id)
     if (res.record.images.generated.length > 0) {
       store.taskId = res.record.images.task_id
-      store.images = res.record.outline.pages.map((page, idx) => {
+      store.images = res.record.outline.pages.map((_page, idx) => {
         const filename = res.record!.images.generated[idx]
         return {
           index: idx,

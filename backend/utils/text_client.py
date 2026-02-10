@@ -1,4 +1,5 @@
 """Text API 客户端封装"""
+import logging
 import time
 import random
 import base64
@@ -6,6 +7,8 @@ import requests
 from functools import wraps
 from typing import List, Optional, Union
 from .image_compressor import compress_image
+
+logger = logging.getLogger(__name__)
 
 
 def retry_on_429(max_retries=3, base_delay=2):
@@ -21,7 +24,7 @@ def retry_on_429(max_retries=3, base_delay=2):
                     if "429" in error_str or "rate" in error_str.lower():
                         if attempt < max_retries - 1:
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
-                            print(f"[重试] 遇到限流，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
+                            logger.warning(f"遇到限流，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                             time.sleep(wait_time)
                             continue
                     raise

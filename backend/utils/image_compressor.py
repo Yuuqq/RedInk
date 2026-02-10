@@ -1,7 +1,10 @@
 """图片压缩工具"""
 import io
+import logging
 from PIL import Image
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def compress_image(
@@ -82,12 +85,12 @@ def compress_image(
         compressed_size_kb = len(compressed_data) / 1024
         compression_ratio = (1 - compressed_size_kb / original_size_kb) * 100
 
-        print(f"[图片压缩] {original_size_kb:.1f}KB → {compressed_size_kb:.1f}KB (压缩 {compression_ratio:.1f}%)")
+        logger.info(f"图片压缩: {original_size_kb:.1f}KB → {compressed_size_kb:.1f}KB (压缩 {compression_ratio:.1f}%)")
 
         return compressed_data
 
     except Exception as e:
-        print(f"[图片压缩] 压缩失败，返回原图: {e}")
+        logger.warning(f"图片压缩失败，返回原图: {e}")
         return image_data
 
 

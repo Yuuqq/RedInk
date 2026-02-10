@@ -128,11 +128,11 @@ interface FormData {
   name: string
   type: string
   api_key: string
-  api_key_masked?: string
-  _has_api_key?: boolean
+  api_key_masked: string
+  _has_api_key: boolean
   base_url: string
   model: string
-  endpoint_type?: string
+  endpoint_type: string
 }
 
 // 定义类型选项

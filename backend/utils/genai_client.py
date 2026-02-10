@@ -1,4 +1,5 @@
 """Google GenAI 客户端封装"""
+import logging
 import time
 import random
 from functools import wraps
@@ -7,6 +8,8 @@ from google.genai import types
 
 # 导入统一的错误解析函数
 from ..generators.google_genai import parse_genai_error
+
+logger = logging.getLogger(__name__)
 
 
 def retry_on_429(max_retries=3, base_delay=2):
@@ -45,10 +48,10 @@ def retry_on_429(max_retries=3, base_delay=2):
                     if attempt < max_retries - 1:
                         if "429" in error_str or "resource_exhausted" in error_str:
                             wait_time = (base_delay ** attempt) + random.uniform(0, 1)
-                            print(f"[重试] 遇到资源限制，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
+                            logger.warning(f"遇到资源限制，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                         else:
                             wait_time = min(2 ** attempt, 10) + random.uniform(0, 1)
-                            print(f"[重试] 请求失败，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
+                            logger.warning(f"请求失败，{wait_time:.1f}秒后重试 (尝试 {attempt + 2}/{max_retries})")
                         time.sleep(wait_time)
                         continue
 

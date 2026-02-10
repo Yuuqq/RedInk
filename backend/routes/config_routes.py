@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import yaml
 from flask import Blueprint, request, jsonify
+from backend.middleware import require_auth
 from .utils import prepare_providers_for_response
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ def create_config_blueprint():
             }), 500
 
     @config_bp.route('/config', methods=['POST'])
+    @require_auth
     def update_config():
         """
         更新配置
@@ -123,6 +125,7 @@ def create_config_blueprint():
     # ==================== 连接测试 ====================
 
     @config_bp.route('/config/test', methods=['POST'])
+    @require_auth
     def test_connection():
         """
         测试服务商连接

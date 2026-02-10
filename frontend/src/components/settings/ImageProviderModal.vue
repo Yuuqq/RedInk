@@ -163,13 +163,13 @@ interface FormData {
   name: string
   type: string
   api_key: string
-  api_key_masked?: string
-  _has_api_key?: boolean
+  api_key_masked: string
+  _has_api_key: boolean
   base_url: string
   model: string
-  endpoint_type?: string
-  high_concurrency?: boolean
-  short_prompt?: boolean
+  endpoint_type: string
+  high_concurrency: boolean
+  short_prompt: boolean
 }
 
 // 定义类型选项

@@ -7,6 +7,8 @@ from pathlib import Path
 from flask import Flask, send_from_directory
 from flask import request as flask_request
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from backend.config import Config
 from backend.routes import register_routes
 
@@ -156,6 +158,17 @@ def create_app():
             "allow_headers": ["Content-Type", "Authorization"],
         }
     })
+
+    # Rate limiting
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=[
+            os.environ.get('REDINK_RATE_LIMIT', '60 per minute')
+        ],
+        storage_uri="memory://",
+    )
+    app.limiter = limiter
 
     # 注册所有 API 路由
     register_routes(app)

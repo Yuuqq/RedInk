@@ -7,6 +7,7 @@
 
 import os
 import json
+import logging
 import uuid
 import re
 import threading
@@ -14,6 +15,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class RecordStatus:
@@ -313,18 +316,18 @@ class HistoryService:
 
                     # Never delete symlinks
                     if raw_dir.is_symlink():
-                        print(f"跳过符号链接任务目录: {raw_dir}")
+                        logger.warning(f"跳过符号链接任务目录: {raw_dir}")
                     else:
                         resolved = raw_dir.resolve()
                         resolved.relative_to(base)
                         if resolved.exists() and resolved.is_dir():
                             import shutil
                             shutil.rmtree(str(resolved))
-                            print(f"已删除任务目录: {resolved}")
+                            logger.info(f"已删除任务目录: {resolved}")
                 except Exception as e:
-                    print(f"删除任务目录失败: {task_id}, {e}")
+                    logger.error(f"删除任务目录失败: {task_id}, {e}")
             else:
-                print(f"任务目录 task_id 不安全，已跳过删除: {task_id}")
+                logger.warning(f"任务目录 task_id 不安全，已跳过删除: {task_id}")
 
         # 删除记录 JSON 文件
         record_path = self._get_record_path(record_id)

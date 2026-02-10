@@ -55,9 +55,9 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN mkdir -p output history
 
 # 设置环境变量
-ENV FLASK_DEBUG=False
-ENV FLASK_HOST=0.0.0.0
-ENV FLASK_PORT=12398
+ENV REDINK_DEBUG=false
+ENV REDINK_HOST=0.0.0.0
+ENV REDINK_PORT=12398
 
 # 暴露端口
 EXPOSE 12398
