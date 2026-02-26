@@ -200,6 +200,9 @@
   cursor: pointer;
   position: relative;
   transition: all 0.3s;
+  background: transparent;
+  border: none;
+  appearance: none;
 }
 
 .tab-item:hover {
@@ -220,6 +223,12 @@
   height: 2px;
   background: var(--primary);
   border-radius: 2px 2px 0 0;
+}
+
+.tab-item:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 4px;
+  border-radius: 10px;
 }
 
 /* Pills / Badges */

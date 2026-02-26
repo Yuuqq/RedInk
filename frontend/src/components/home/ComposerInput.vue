@@ -37,19 +37,27 @@
       </div>
       <div class="upload-hint">
         这些图片将用于生成封面和内容参考
+        <div v-if="uploadNotice" class="upload-notice">{{ uploadNotice }}</div>
+        <div v-else-if="uploadedImages.length >= MAX_IMAGES" class="upload-notice">
+          已达到上限（最多 {{ MAX_IMAGES }} 张），如需更换请先删除已有图片
+        </div>
       </div>
     </div>
 
     <!-- 工具栏 -->
     <div class="composer-toolbar">
       <div class="toolbar-left">
-        <label class="tool-btn upload-pill" :class="{ 'active': uploadedImages.length > 0, 'disabled': loading }" title="上传参考图">
+        <label
+          class="tool-btn upload-pill"
+          :class="{ 'active': uploadedImages.length > 0, 'disabled': loading || uploadedImages.length >= MAX_IMAGES }"
+          title="上传参考图"
+        >
           <input
             type="file"
             accept="image/*"
             multiple
             @change="handleImageUpload"
-            :disabled="loading"
+            :disabled="loading || uploadedImages.length >= MAX_IMAGES"
             style="display: none;"
           />
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -111,6 +119,59 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 
 // 已上传的图片
 const uploadedImages = ref<UploadedImage[]>([])
+const uploadNotice = ref('')
+
+const MAX_IMAGES = 5
+const MAX_DIMENSION = 1280
+const TARGET_MAX_BYTES = 500 * 1024 // ~500KB
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality))
+}
+
+async function compressImageFile(file: File): Promise<File> {
+  try {
+    if (!file.type.startsWith('image/')) return file
+    if (file.size <= TARGET_MAX_BYTES) return file
+
+    // Prefer ImageBitmap for performance; fall back to original file on failure.
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height))
+    const width = Math.max(1, Math.round(bitmap.width * scale))
+    const height = Math.max(1, Math.round(bitmap.height * scale))
+
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return file
+
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    if (typeof (bitmap as any).close === 'function') {
+      ;(bitmap as any).close()
+    }
+
+    const type = 'image/jpeg'
+    let quality = 0.85
+    let blob = await canvasToBlob(canvas, type, quality)
+
+    while (blob && blob.size > TARGET_MAX_BYTES && quality > 0.55) {
+      quality -= 0.1
+      blob = await canvasToBlob(canvas, type, quality)
+    }
+
+    if (!blob) return file
+
+    const baseName = file.name.replace(/\.[^.]+$/, '')
+    return new File([blob], `${baseName}.jpg`, {
+      type: blob.type,
+      lastModified: Date.now()
+    })
+  } catch {
+    return file
+  }
+}
 
 /**
  * 处理输入变化
@@ -144,20 +205,30 @@ function adjustHeight() {
 /**
  * 处理图片上传
  */
-function handleImageUpload(event: Event) {
+async function handleImageUpload(event: Event) {
   const target = event.target as HTMLInputElement
   if (!target.files) return
 
+  uploadNotice.value = ''
+
   const files = Array.from(target.files)
-  files.forEach((file) => {
-    // 限制最多 5 张图片
-    if (uploadedImages.value.length >= 5) {
-      return
-    }
-    // 创建预览 URL
-    const preview = URL.createObjectURL(file)
-    uploadedImages.value.push({ file, preview })
-  })
+  const remainingSlots = Math.max(0, MAX_IMAGES - uploadedImages.value.length)
+  if (remainingSlots <= 0) {
+    uploadNotice.value = `已达到上限（最多 ${MAX_IMAGES} 张）`
+    target.value = ''
+    return
+  }
+
+  const accepted = files.slice(0, remainingSlots)
+  if (accepted.length < files.length) {
+    uploadNotice.value = `最多 ${MAX_IMAGES} 张图片，已忽略多余 ${files.length - accepted.length} 张`
+  }
+
+  for (const file of accepted) {
+    const finalFile = await compressImageFile(file)
+    const preview = URL.createObjectURL(finalFile)
+    uploadedImages.value.push({ file: finalFile, preview })
+  }
 
   // 通知父组件
   emitImagesChange()
@@ -174,6 +245,7 @@ function removeImage(index: number) {
   // 释放预览 URL
   URL.revokeObjectURL(img.preview)
   uploadedImages.value.splice(index, 1)
+  uploadNotice.value = ''
 
   // 通知父组件
   emitImagesChange()
@@ -193,6 +265,7 @@ function emitImagesChange() {
 function clearPreviews() {
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview))
   uploadedImages.value = []
+  uploadNotice.value = ''
 }
 
 function focus() {
@@ -348,6 +421,12 @@ defineExpose({
   font-size: 12px;
   color: var(--text-sub);
   text-align: right;
+}
+
+.upload-notice {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #d1242f;
 }
 
 /* 工具栏 */

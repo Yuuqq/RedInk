@@ -136,7 +136,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useGeneratorStore } from '../../stores/generator'
-import { generateContent } from '../../api'
+import { generateContent, updateHistory } from '../../api'
 
 const store = useGeneratorStore()
 
@@ -167,6 +167,20 @@ async function handleGenerate() {
 
     if (result.success && result.titles && result.copywriting && result.tags) {
       store.setContent(result.titles, result.copywriting, result.tags)
+      if (store.recordId) {
+        try {
+          await updateHistory(store.recordId, {
+            content: {
+              titles: result.titles,
+              copywriting: result.copywriting,
+              tags: result.tags
+            }
+          })
+        } catch (e) {
+          // 保存失败不阻断使用，仅记录
+          console.error('保存内容到历史记录失败:', e)
+        }
+      }
     } else {
       store.setContentError(result.error || '生成失败')
     }

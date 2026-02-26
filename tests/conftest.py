@@ -35,6 +35,17 @@ def temp_history_dir():
 
 
 @pytest.fixture
+def history_service(temp_history_dir):
+    """Create a HistoryService that writes to a temp directory."""
+    from backend.services.history import HistoryService
+    service = HistoryService()
+    service.history_dir = temp_history_dir
+    service.index_file = os.path.join(temp_history_dir, "index.json")
+    service._init_index()
+    return service
+
+
+@pytest.fixture
 def sample_pages():
     """示例页面数据"""
     return [

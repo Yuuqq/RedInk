@@ -9,6 +9,7 @@ import time
 import base64
 import logging
 from flask import Blueprint, request, jsonify
+from backend.config import Config
 from backend.services.outline import get_outline_service
 from .utils import log_request, log_error
 
@@ -68,6 +69,11 @@ def create_outline_blueprint():
                 logger.error(f"❌ 大纲生成失败: {result.get('error', '未知错误')}")
                 return jsonify(result), 500
 
+        except ValueError as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 400
         except Exception as e:
             log_error('/outline', e)
             error_msg = str(e)
@@ -98,25 +104,66 @@ def _parse_outline_request():
         # 获取上传的图片文件
         if 'images' in request.files:
             files = request.files.getlist('images')
+            if len(files) > Config.MAX_BASE64_IMAGES:
+                raise ValueError(f"参数错误：images 最多允许 {Config.MAX_BASE64_IMAGES} 张图片")
+
+            total_bytes = 0
             for file in files:
                 if file and file.filename:
                     image_data = file.read()
+                    if len(image_data) > Config.MAX_BASE64_IMAGE_BYTES:
+                        raise ValueError("参数错误：上传图片过大")
+
+                    total_bytes += len(image_data)
+                    if total_bytes > Config.MAX_BASE64_TOTAL_BYTES:
+                        raise ValueError("参数错误：上传图片总大小超过限制")
                     images.append(image_data)
 
         return topic, images
 
     # JSON 请求（无图片或 base64 图片）
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        raise ValueError("请求体必须是 JSON object")
     topic = data.get('topic')
     images = []
 
     # 支持 base64 格式的图片
     images_base64 = data.get('images', [])
     if images_base64:
+        if not isinstance(images_base64, list):
+            raise ValueError("参数错误：images 必须是数组")
+
+        if len(images_base64) > Config.MAX_BASE64_IMAGES:
+            raise ValueError(f"参数错误：images 最多允许 {Config.MAX_BASE64_IMAGES} 张图片")
+
+        total_bytes = 0
         for img_b64 in images_base64:
+            if not isinstance(img_b64, str) or not img_b64:
+                raise ValueError("参数错误：images 中存在无效的 base64 字符串")
+
             # 移除可能的 data URL 前缀
             if ',' in img_b64:
-                img_b64 = img_b64.split(',')[1]
-            images.append(base64.b64decode(img_b64))
+                img_b64 = img_b64.split(',', 1)[1]
+
+            img_b64 = img_b64.strip()
+
+            max_b64_len = int(Config.MAX_BASE64_IMAGE_BYTES * 4 / 3) + 8
+            if len(img_b64) > max_b64_len:
+                raise ValueError("参数错误：images 中存在过大的图片数据")
+
+            try:
+                img = base64.b64decode(img_b64, validate=True)
+            except Exception as e:
+                raise ValueError("参数错误：images 中存在无效的 base64 数据") from e
+
+            if len(img) > Config.MAX_BASE64_IMAGE_BYTES:
+                raise ValueError("参数错误：images 中存在过大的图片数据")
+
+            total_bytes += len(img)
+            if total_bytes > Config.MAX_BASE64_TOTAL_BYTES:
+                raise ValueError("参数错误：images 总大小超过限制")
+
+            images.append(img)
 
     return topic, images

@@ -10,6 +10,16 @@
         </p>
       </div>
       <div class="page-actions">
+        <div class="style-select">
+          <span class="style-label">风格</span>
+          <select v-model="store.styleHint" class="style-dropdown">
+            <option value="">默认</option>
+            <option value="清新水彩插画风，柔和配色，留白感，温暖治愈。">清新水彩</option>
+            <option value="极简高级感，干净留白，黑白灰为主，少量强调色。">极简高级</option>
+            <option value="可爱卡通插画风，明亮配色，圆润元素，轻松活泼。">可爱卡通</option>
+            <option value="复古胶片风，暖色调，轻微颗粒感，怀旧质感。">复古胶片</option>
+          </select>
+        </div>
         <button class="btn btn-secondary" @click="goBack">
           上一步
         </button>
@@ -267,6 +277,32 @@ watch(
 </script>
 
 <style scoped>
+/* 风格选择 */
+.style-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.style-label {
+  font-size: 12px;
+  color: var(--text-sub);
+  white-space: nowrap;
+}
+
+.style-dropdown {
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 12px;
+  color: var(--text-main);
+  max-width: 140px;
+}
+
 /* 网格布局 */
 .outline-grid {
   display: grid;

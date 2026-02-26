@@ -92,7 +92,9 @@ def create_config_blueprint():
         - message: 结果消息
         """
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({"success": False, "error": "请求体必须是 JSON object"}), 400
 
             # 更新图片生成配置
             if 'image_generation' in data:
@@ -142,7 +144,9 @@ def create_config_blueprint():
         - message: 测试结果消息
         """
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({"success": False, "error": "请求体必须是 JSON object"}), 400
             provider_type = data.get('type')
             provider_name = data.get('provider_name')
 

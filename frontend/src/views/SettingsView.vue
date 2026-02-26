@@ -11,6 +11,39 @@
     </div>
 
     <div v-else class="settings-container">
+      <!-- 访问控制 -->
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2 class="section-title">访问控制</h2>
+            <p class="section-desc">
+              当后端启用 <span class="mono">REDINK_AUTH_TOKEN</span> 时，需要在此填写同样的 Token 才能正常访问 API（生成/历史/管理面板等）
+            </p>
+          </div>
+          <div class="auth-actions">
+            <button class="btn btn-small btn-secondary" @click="onClearAuthToken" :disabled="!authToken">
+              清除
+            </button>
+            <button class="btn btn-small btn-primary" @click="onSaveAuthToken">
+              保存
+            </button>
+          </div>
+        </div>
+
+        <div class="auth-body">
+          <input
+            v-model="authToken"
+            class="input"
+            type="password"
+            autocomplete="off"
+            placeholder="Bearer Token（仅保存在当前浏览器）"
+          />
+          <p class="auth-hint">
+            将以请求头 <span class="mono">Authorization: Bearer &lt;token&gt;</span> 发送；留空表示不发送。
+          </p>
+        </div>
+      </div>
+
       <!-- 文本生成配置 -->
       <div class="card">
         <div class="section-header">
@@ -96,10 +129,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import ProviderTable from '../components/settings/ProviderTable.vue'
 import ProviderModal from '../components/settings/ProviderModal.vue'
 import ImageProviderModal from '../components/settings/ImageProviderModal.vue'
+import { clearAuthToken, getAuthToken, setAuthToken } from '../api/http'
 import {
   useProviderForm,
   textTypeOptions,
@@ -162,6 +196,18 @@ const {
   updateImageForm
 } = useProviderForm()
 
+const authToken = ref(getAuthToken())
+
+function onSaveAuthToken() {
+  setAuthToken(authToken.value)
+  authToken.value = getAuthToken()
+}
+
+function onClearAuthToken() {
+  clearAuthToken()
+  authToken.value = ''
+}
+
 onMounted(() => {
   loadConfig()
 })
@@ -191,6 +237,30 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-sub);
   margin: 0;
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auth-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-sub);
+  line-height: 1.5;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
 /* 按钮样式 */

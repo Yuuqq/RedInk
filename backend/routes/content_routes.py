@@ -36,9 +36,20 @@ def create_content_blueprint():
         start_time = time.time()
 
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({
+                    "success": False,
+                    "error": "请求体必须是 JSON object"
+                }), 400
+
             topic = data.get('topic', '')
             outline = data.get('outline', '')
+            if not isinstance(topic, str) or not isinstance(outline, str):
+                return jsonify({
+                    "success": False,
+                    "error": "参数错误：topic 和 outline 必须是字符串"
+                }), 400
 
             log_request('/content', {'topic': topic[:50] if topic else '', 'outline_length': len(outline)})
 

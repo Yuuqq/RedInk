@@ -70,6 +70,25 @@ def _require_local():
     return None
 
 
+def _require_admin_token_if_remote_enabled():
+    """
+    防止误开放管理接口：
+    - 当允许非本机访问（REDINK_ADMIN_ALLOW_REMOTE / REDINK_ADMIN_TRUST_PRIVATE）时，强制要求配置 REDINK_AUTH_TOKEN
+    """
+    allow_remote = os.environ.get("REDINK_ADMIN_ALLOW_REMOTE", "").strip().lower() in ("1", "true", "yes")
+    trust_private = os.environ.get("REDINK_ADMIN_TRUST_PRIVATE", "").strip().lower() in ("1", "true", "yes")
+    if not (allow_remote or trust_private):
+        return None
+
+    if (os.environ.get("REDINK_AUTH_TOKEN") or "").strip():
+        return None
+
+    return jsonify({
+        "success": False,
+        "error": "启用远程管理接口前，请先设置环境变量 REDINK_AUTH_TOKEN（用于 Bearer Token 认证）",
+    }), 403
+
+
 def _read_yaml(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -248,7 +267,10 @@ def create_admin_blueprint():
 
     @admin_bp.before_request
     def _guard():
-        return _require_local()
+        resp = _require_local()
+        if resp is not None:
+            return resp
+        return _require_admin_token_if_remote_enabled()
 
     @admin_bp.route("/admin/health", methods=["GET"])
     def admin_health():

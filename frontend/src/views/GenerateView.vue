@@ -3,13 +3,21 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">生成图片</h1>
-        <p class="page-subtitle">
-          <span v-if="isGenerating">正在生成第 {{ store.progress.current + 1 }} / {{ store.progress.total }} 页</span>
+          <p class="page-subtitle">
+          <span v-if="isGenerating">已完成 {{ store.progress.current }} / {{ store.progress.total }} 页</span>
           <span v-else-if="hasFailedImages">{{ failedCount }} 张图片生成失败，可点击重试</span>
           <span v-else>全部 {{ store.progress.total }} 张图片生成完成</span>
         </p>
       </div>
       <div class="page-actions">
+        <button
+          v-if="isGenerating"
+          class="btn btn-secondary"
+          @click="cancelGeneration"
+          :disabled="isCancelling"
+        >
+          {{ isCancelling ? '取消中...' : '取消生成' }}
+        </button>
         <button
           v-if="hasFailedImages && !isGenerating"
           class="btn btn-primary"
@@ -99,13 +107,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import { generateImagesPost, regenerateImage as apiRegenerateImage, retryFailedImages as apiRetryFailed, createHistory, updateHistory } from '../api'
+import { generateImagesPost, regenerateImage as apiRegenerateImage, retryFailedImages as apiRetryFailed, createHistory, updateHistory, cancelTask } from '../api'
 
 const router = useRouter()
 const store = useGeneratorStore()
 
 const error = ref('')
 const isRetrying = ref(false)
+const isCancelling = ref(false)
 
 const isGenerating = computed(() => store.progress.status === 'generating')
 
@@ -128,6 +137,22 @@ const getStatusText = (status: string) => {
   return texts[status] || '等待中'
 }
 
+async function cancelGeneration() {
+  if (!store.taskId) return
+  isCancelling.value = true
+  try {
+    const res = await cancelTask(store.taskId)
+    if (!res.success) {
+      error.value = '取消失败: ' + (res.error || '未知错误')
+      isCancelling.value = false
+      return
+    }
+  } catch (e) {
+    error.value = '取消失败: ' + String(e)
+    isCancelling.value = false
+  }
+}
+
 // 重试单张图片（异步并发执行，不阻塞）
 function retrySingleImage(index: number) {
   if (!store.taskId) return
@@ -141,7 +166,8 @@ function retrySingleImage(index: number) {
   // 构建上下文信息
   const context = {
     fullOutline: store.outline.raw || '',
-    userTopic: store.topic || ''
+    userTopic: store.topic || '',
+    styleHint: store.styleHint || ''
   }
 
   // 异步执行重绘，不阻塞
@@ -210,6 +236,13 @@ async function retryAllFailed() {
   }
 }
 
+function ensureTaskId() {
+  if (store.taskId) return store.taskId
+  const rand = Math.random().toString(16).slice(2, 10)
+  store.taskId = `task_${Date.now()}_${rand}`
+  return store.taskId
+}
+
 onMounted(async () => {
   if (store.outline.pages.length === 0) {
     router.push('/')
@@ -248,11 +281,30 @@ onMounted(async () => {
     }
   }
 
-  store.startGeneration()
+  const shouldStart = store.progress.status === 'idle'
+  const shouldResume = store.progress.status === 'generating'
+
+  if (!shouldStart && !shouldResume) {
+    return
+  }
+
+  ensureTaskId()
+
+  if (shouldStart) {
+    store.startGeneration()
+  } else {
+    // 恢复模式：尽量不重置已完成的图片；如数据不完整则兜底重新初始化占位
+    if (store.images.length !== store.outline.pages.length) {
+      store.startGeneration()
+    } else {
+      store.progress.total = store.outline.pages.length
+      store.recalculateProgressCurrent()
+    }
+  }
 
   generateImagesPost(
     store.outline.pages,
-    null,
+    store.taskId,
     store.outline.raw,  // 传入完整大纲文本
     // onProgress
     (event) => {
@@ -270,39 +322,61 @@ onMounted(async () => {
       console.error('Error:', event)
       store.updateProgress(event.index, 'error', undefined, event.message)
     },
-    // onFinish
-    async (event) => {
-      console.log('Finish:', event)
-      store.finishGeneration(event.task_id)
+      // onFinish
+      async (event) => {
+        console.log('Finish:', event)
+        store.finishGeneration(event.task_id)
+        isCancelling.value = false
 
-      // 更新历史记录
-      if (store.recordId) {
-        try {
-          // 收集所有生成的图片文件名
-          const generatedImages = event.images.filter(img => img !== null)
-
-          // 确定状态
-          let status = 'completed'
-          if (hasFailedImages.value) {
-            status = generatedImages.length > 0 ? 'partial' : 'draft'
+        if (event.cancelled) {
+          error.value = '已取消生成'
+          if (Array.isArray(event.remaining_indices)) {
+            event.remaining_indices.forEach((idx) => {
+              const img = store.images.find(i => i.index === idx)
+              if (img && img.status !== 'done') {
+                store.updateProgress(idx, 'error', undefined, '已取消')
+              }
+            })
           }
-
-          // 获取封面图作为缩略图（只保存文件名，不是完整URL）
-          const thumbnail = generatedImages.length > 0 ? generatedImages[0] : undefined
-
-          await updateHistory(store.recordId, {
-            images: {
-              task_id: event.task_id,
-              generated: generatedImages
-            },
-            status: status,
-            thumbnail: thumbnail
-          })
-          console.log('历史记录已更新')
-        } catch (e) {
-          console.error('更新历史记录失败:', e)
         }
-      }
+
+        // 更新历史记录
+        if (store.recordId) {
+          try {
+            // 使用 index 对齐的图片列表（可能包含 null，占位未生成/失败的页）
+            const expectedCount = store.outline.pages.length
+            const generatedByIndex: Array<string | null> = Array(expectedCount).fill(null)
+            for (let i = 0; i < Math.min(expectedCount, event.images.length); i++) {
+              generatedByIndex[i] = event.images[i]
+            }
+
+            const doneCount = generatedByIndex.filter(Boolean).length
+
+            // 确定状态
+            let status = 'completed'
+            if (doneCount === 0) status = 'draft'
+            else if (doneCount < expectedCount) status = 'partial'
+
+            // 获取封面图作为缩略图（只保存文件名，不是完整URL）
+            const coverIndex = store.outline.pages.find(p => p.type === 'cover')?.index ?? 0
+            const thumbnail =
+              (coverIndex >= 0 && coverIndex < generatedByIndex.length ? generatedByIndex[coverIndex] : null)
+              || generatedByIndex.find(Boolean)
+              || undefined
+
+            await updateHistory(store.recordId, {
+              images: {
+                task_id: event.task_id,
+                generated: generatedByIndex
+              },
+              status: status,
+              thumbnail: thumbnail
+            })
+            console.log('历史记录已更新')
+          } catch (e) {
+            console.error('更新历史记录失败:', e)
+          }
+        }
 
       // 如果没有失败的，跳转到结果页
       if (!hasFailedImages.value) {
@@ -314,12 +388,16 @@ onMounted(async () => {
     // onStreamError
     (err) => {
       console.error('Stream Error:', err)
+      isCancelling.value = false
+      store.progress.status = 'error'
       error.value = '生成失败: ' + err.message
     },
     // userImages - 用户上传的参考图片
     store.userImages.length > 0 ? store.userImages : undefined,
     // userTopic - 用户原始输入
-    store.topic
+    store.topic,
+    // styleHint - 风格偏好
+    store.styleHint
   )
 })
 </script>

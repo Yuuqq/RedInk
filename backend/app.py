@@ -1,4 +1,5 @@
 import logging
+import hmac
 import os
 import sys
 import ctypes
@@ -150,6 +151,56 @@ def create_app():
         app = Flask(__name__)
 
     app.config.from_object(Config)
+
+    @app.before_request
+    def _require_api_auth():
+        """
+        Optional API-wide auth guard.
+
+        When REDINK_AUTH_TOKEN is set, require `Authorization: Bearer <token>` for most `/api/*` routes.
+        Exemptions:
+        - `/api/health` (used by health checks)
+        - `/api/images/*` (used by <img> tags which can't send headers)
+        - `OPTIONS` (CORS preflight)
+        """
+        auth_token = (os.environ.get("REDINK_AUTH_TOKEN") or "").strip()
+        if not auth_token:
+            return None
+
+        path = flask_request.path or ""
+        if not path.startswith("/api/"):
+            return None
+        if flask_request.method == "OPTIONS":
+            return None
+        if path == "/api/health" or path.startswith("/api/images/"):
+            return None
+
+        auth_header = flask_request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return {
+                "success": False,
+                "error": "未提供认证令牌。请在请求头中添加 Authorization: Bearer <token>",
+            }, 401
+
+        token = auth_header[7:]
+        if not hmac.compare_digest(token, auth_token):
+            logger.warning(f"认证失败: 来自 {flask_request.remote_addr}")
+            return {"success": False, "error": "认证令牌无效"}, 401
+
+        return None
+
+    @app.after_request
+    def _add_security_headers(resp):
+        # Safe, low-risk defaults. Consider adding CSP/HSTS at your reverse proxy.
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        return resp
+
+    @app.errorhandler(413)
+    def _request_too_large(_e):
+        if flask_request.path.startswith("/api/"):
+            return {"success": False, "error": "请求体过大（413）。请减少图片数量/大小或调大 REDINK_MAX_CONTENT_LENGTH。"}, 413
+        return "Request Entity Too Large", 413
 
     CORS(app, resources={
         r"/api/*": {

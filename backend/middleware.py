@@ -1,5 +1,6 @@
 """Authentication and rate limiting middleware"""
 import logging
+import hmac
 import os
 from functools import wraps
 from flask import request, jsonify
@@ -33,7 +34,7 @@ def require_auth(f):
             }), 401
 
         token = auth_header[7:]
-        if token != auth_token:
+        if not hmac.compare_digest(token, auth_token):
             logger.warning(f"认证失败: 来自 {request.remote_addr}")
             return jsonify({
                 'success': False,

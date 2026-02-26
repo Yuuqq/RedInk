@@ -46,6 +46,36 @@ class HistoryService:
         self.index_file = os.path.join(self.history_dir, "index.json")
         self._init_index()
 
+    def _safe_task_dir(self, task_id: str) -> Optional[Path]:
+        """
+        Return a safe task directory path inside history_dir.
+
+        Prevent path traversal and refuse symlinks.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
+            return None
+
+        base = Path(self.history_dir).resolve()
+        raw = (Path(self.history_dir) / str(task_id))
+
+        # Never follow symlinks
+        try:
+            if raw.is_symlink():
+                return None
+        except Exception:
+            return None
+
+        target = raw.resolve()
+        try:
+            target.relative_to(base)
+        except Exception:
+            return None
+
+        if not target.exists() or not target.is_dir():
+            return None
+
+        return target
+
     def _init_index(self) -> None:
         """
         初始化索引文件
@@ -89,7 +119,33 @@ class HistoryService:
         Returns:
             str: 记录文件的完整路径
         """
-        return os.path.join(self.history_dir, f"{record_id}.json")
+        record_path = self._safe_record_path(record_id)
+        return str(record_path) if record_path else ""
+
+    def _safe_record_path(self, record_id: str) -> Optional[Path]:
+        """
+        Return a safe record file path inside history_dir.
+
+        Prevent path traversal and refuse symlinks.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(record_id) or ""):
+            return None
+
+        base = Path(self.history_dir).resolve()
+        raw = base / f"{record_id}.json"
+        try:
+            resolved = raw.resolve()
+            resolved.relative_to(base)
+        except Exception:
+            return None
+
+        try:
+            if raw.exists() and raw.is_symlink():
+                return None
+        except Exception:
+            return None
+
+        return raw
 
     def create_record(
         self,
@@ -113,6 +169,11 @@ class HistoryService:
         状态流转：
             新建 -> draft（草稿状态）
         """
+        # Only persist safe task_ids to avoid poisoning later file operations.
+        if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
+            logger.warning(f"task_id 不安全，已忽略: {task_id}")
+            task_id = None
+
         # 生成唯一记录 ID
         record_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
@@ -127,6 +188,11 @@ class HistoryService:
             "images": {
                 "task_id": task_id,
                 "generated": []  # 初始无生成图片
+            },
+            "content": {
+                "titles": [],
+                "copywriting": "",
+                "tags": []
             },
             "status": RecordStatus.DRAFT,  # 初始状态：草稿
             "thumbnail": None  # 初始无缩略图
@@ -174,6 +240,8 @@ class HistoryService:
             - thumbnail: 缩略图文件名
         """
         record_path = self._get_record_path(record_id)
+        if not record_path:
+            return None
 
         if not os.path.exists(record_path):
             return None
@@ -195,13 +263,14 @@ class HistoryService:
             bool: 记录是否存在
         """
         record_path = self._get_record_path(record_id)
-        return os.path.exists(record_path)
+        return bool(record_path and os.path.exists(record_path))
 
     def update_record(
         self,
         record_id: str,
         outline: Optional[Dict] = None,
         images: Optional[Dict] = None,
+        content: Optional[Dict] = None,
         status: Optional[str] = None,
         thumbnail: Optional[str] = None
     ) -> bool:
@@ -246,6 +315,10 @@ class HistoryService:
         if images is not None:
             record["images"] = images
 
+        # 更新内容信息（标题/文案/标签）
+        if content is not None:
+            record["content"] = content
+
         # 更新状态（状态流转）
         if status is not None:
             record["status"] = status
@@ -256,6 +329,8 @@ class HistoryService:
 
         # 保存完整记录
         record_path = self._get_record_path(record_id)
+        if not record_path:
+            return False
         with open(record_path, "w", encoding="utf-8") as f:
             json.dump(record, f, ensure_ascii=False, indent=2)
 
@@ -266,19 +341,19 @@ class HistoryService:
                 idx_record["updated_at"] = now
 
                 # 更新状态
-                if status:
+                if status is not None:
                     idx_record["status"] = status
 
                 # 更新缩略图
-                if thumbnail:
+                if thumbnail is not None:
                     idx_record["thumbnail"] = thumbnail
 
                 # 更新页数（如果大纲被修改）
-                if outline:
+                if outline is not None:
                     idx_record["page_count"] = len(outline.get("pages", []))
 
                 # 更新任务 ID
-                if images is not None and images.get("task_id"):
+                if images is not None:
                     idx_record["task_id"] = images.get("task_id")
 
                 break
@@ -331,6 +406,8 @@ class HistoryService:
 
         # 删除记录 JSON 文件
         record_path = self._get_record_path(record_id)
+        if not record_path:
+            return False
         try:
             os.remove(record_path)
         except Exception:
@@ -460,23 +537,28 @@ class HistoryService:
                 - status: 更新后的状态
                 - error: 错误信息（失败时）
         """
-        task_dir = os.path.join(self.history_dir, task_id)
-
-        if not os.path.exists(task_dir) or not os.path.isdir(task_dir):
+        task_path = self._safe_task_dir(task_id)
+        if not task_path:
             return {
                 "success": False,
-                "error": f"任务目录不存在: {task_id}"
+                "error": f"任务目录不存在或路径不安全: {task_id}"
             }
 
         try:
             # 扫描目录下所有图片文件（排除缩略图）
-            image_files = []
-            for filename in os.listdir(task_dir):
+            image_files: List[str] = []
+            index_to_file: Dict[int, str] = {}
+            for filename in os.listdir(str(task_path)):
                 # 跳过缩略图文件（以 thumb_ 开头）
                 if filename.startswith('thumb_'):
                     continue
                 if filename.endswith('.png') or filename.endswith('.jpg') or filename.endswith('.jpeg'):
                     image_files.append(filename)
+                    try:
+                        idx = int(filename.split('.')[0])
+                        index_to_file[idx] = filename
+                    except Exception:
+                        pass
 
             # 按文件名排序（数字排序）
             def get_index(filename):
@@ -503,32 +585,56 @@ class HistoryService:
                 if record:
                     # 根据生成图片数量判断状态
                     expected_count = len(record.get("outline", {}).get("pages", []))
-                    actual_count = len(image_files)
+                    aligned: List[Optional[str]] = [None] * expected_count
+                    for idx, fname in index_to_file.items():
+                        if 0 <= idx < expected_count:
+                            aligned[idx] = fname
 
-                    if actual_count == 0:
+                    done_count = sum(1 for x in aligned if x)
+
+                    if expected_count <= 0 or done_count == 0:
                         status = RecordStatus.DRAFT  # 无图片：草稿
-                    elif actual_count >= expected_count:
+                    elif done_count == expected_count:
                         status = RecordStatus.COMPLETED  # 全部完成
                     else:
                         status = RecordStatus.PARTIAL  # 部分完成
+
+                    pages = record.get("outline", {}).get("pages", []) or []
+                    cover_index = 0
+                    for p in pages:
+                        if isinstance(p, dict) and p.get("type") == "cover":
+                            try:
+                                cover_index = int(p.get("index", 0))
+                            except Exception:
+                                cover_index = 0
+                            break
+
+                    thumbnail = None
+                    if 0 <= cover_index < len(aligned) and aligned[cover_index]:
+                        thumbnail = aligned[cover_index]
+                    else:
+                        for x in aligned:
+                            if x:
+                                thumbnail = x
+                                break
 
                     # 更新图片列表和状态
                     self.update_record(
                         record_id,
                         images={
                             "task_id": task_id,
-                            "generated": image_files
+                            "generated": aligned
                         },
                         status=status,
-                        thumbnail=image_files[0] if image_files else None
+                        thumbnail=thumbnail
                     )
 
                     return {
                         "success": True,
                         "record_id": record_id,
                         "task_id": task_id,
-                        "images_count": len(image_files),
-                        "images": image_files,
+                        "images_count": done_count,
+                        "images": aligned,
                         "status": status
                     }
 

@@ -273,7 +273,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import axios from 'axios'
+import http from '../api/http'
 import { RouterLink } from 'vue-router'
 import {
   cleanupAdminTask,
@@ -666,7 +666,7 @@ async function openTask(taskId: string) {
   taskModal.error = ''
   taskModal.json = ''
   try {
-    const resp = await axios.get(`/api/task/${encodeURIComponent(taskId)}`)
+    const resp = await http.get(`/api/task/${encodeURIComponent(taskId)}`)
     taskModal.json = JSON.stringify(resp.data, null, 2)
   } catch (e: any) {
     taskModal.error = e?.response?.data?.error || e?.message || String(e)

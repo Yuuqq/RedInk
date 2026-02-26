@@ -12,6 +12,14 @@ class Config:
     DEBUG = os.environ.get('REDINK_DEBUG', 'false').lower() in ('true', '1', 'yes')
     HOST = os.environ.get('REDINK_HOST', '0.0.0.0')
     PORT = int(os.environ.get('REDINK_PORT', '12398'))
+
+    # Request size limits (bytes). Flask will reject larger bodies with 413.
+    MAX_CONTENT_LENGTH = int(os.environ.get('REDINK_MAX_CONTENT_LENGTH', str(32 * 1024 * 1024)))
+
+    # Base64 image input limits (applies to JSON base64 image arrays).
+    MAX_BASE64_IMAGES = int(os.environ.get('REDINK_MAX_BASE64_IMAGES', '8'))
+    MAX_BASE64_IMAGE_BYTES = int(os.environ.get('REDINK_MAX_BASE64_IMAGE_BYTES', str(10 * 1024 * 1024)))
+    MAX_BASE64_TOTAL_BYTES = int(os.environ.get('REDINK_MAX_BASE64_TOTAL_BYTES', str(24 * 1024 * 1024)))
     CORS_ORIGINS = [
         origin.strip()
         for origin in os.environ.get(

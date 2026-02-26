@@ -1,5 +1,6 @@
-import axios from 'axios'
+import { isAxiosError } from 'axios'
 import { consumeSSE } from './sse'
+import http, { getAuthToken } from './http'
 
 const API_BASE_URL = '/api'
 
@@ -28,7 +29,13 @@ export interface ProgressEvent {
 export interface FinishEvent {
   success: boolean
   task_id: string
-  images: string[]
+  images: Array<string | null>
+  total?: number
+  completed?: number
+  failed?: number
+  failed_indices?: number[]
+  cancelled?: boolean
+  remaining_indices?: number[]
 }
 
 // 生成大纲（支持图片上传）
@@ -44,7 +51,7 @@ export async function generateOutline(
       formData.append('images', file)
     })
 
-    const response = await axios.post<OutlineResponse & { has_images?: boolean }>(
+    const response = await http.post<OutlineResponse & { has_images?: boolean }>(
       `${API_BASE_URL}/outline`,
       formData,
       {
@@ -57,7 +64,7 @@ export async function generateOutline(
   }
 
   // 无图片，使用 JSON
-  const response = await axios.post<OutlineResponse>(`${API_BASE_URL}/outline`, {
+  const response = await http.post<OutlineResponse>(`${API_BASE_URL}/outline`, {
     topic
   })
   return response.data
@@ -78,14 +85,16 @@ export async function regenerateImage(
   context?: {
     fullOutline?: string
     userTopic?: string
+    styleHint?: string
   }
 ): Promise<{ success: boolean; index: number; image_url?: string; error?: string }> {
-  const response = await axios.post(`${API_BASE_URL}/regenerate`, {
+  const response = await http.post(`${API_BASE_URL}/regenerate`, {
     task_id: taskId,
     page,
     use_reference: useReference,
     full_outline: context?.fullOutline,
-    user_topic: context?.userTopic
+    user_topic: context?.userTopic,
+    style_hint: context?.styleHint
   })
   return response.data
 }
@@ -101,11 +110,17 @@ export async function retryFailedImages(
   onStreamError: (error: Error) => void
 ) {
   try {
+    const token = getAuthToken()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
     const response = await fetch(`${API_BASE_URL}/retry-failed`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         task_id: taskId,
         pages
@@ -157,7 +172,12 @@ export interface HistoryDetail {
   }
   images: {
     task_id: string | null
-    generated: string[]
+    generated: Array<string | null>
+  }
+  content?: {
+    titles: string[]
+    copywriting: string
+    tags: string[]
   }
   status: string
   thumbnail: string | null
@@ -177,7 +197,8 @@ export interface CreateHistoryParams {
  */
 export interface UpdateHistoryParams {
   outline?: { raw: string; pages: Page[] }
-  images?: { task_id: string | null; generated: string[] }
+  images?: { task_id: string | null; generated: Array<string | null> }
+  content?: { titles: string[]; copywriting: string; tags: string[] }
   status?: string
   thumbnail?: string
 }
@@ -221,7 +242,7 @@ export async function createHistory(
   taskId?: string
 ): Promise<{ success: boolean; record_id?: string; error?: string }> {
   try {
-    const response = await axios.post(
+    const response = await http.post(
       `${API_BASE_URL}/history`,
       {
         topic,
@@ -234,7 +255,7 @@ export async function createHistory(
     )
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return { success: false, error: '请求超时，请检查网络连接' }
       }
@@ -276,13 +297,13 @@ export async function getHistoryList(
     const params: any = { page, page_size: pageSize }
     if (status) params.status = status
 
-    const response = await axios.get(`${API_BASE_URL}/history`, {
+    const response = await http.get(`${API_BASE_URL}/history`, {
       params,
       timeout: 10000 // 10秒超时
     })
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return {
           success: false,
@@ -343,12 +364,12 @@ export async function getHistory(recordId: string): Promise<{
   error?: string
 }> {
   try {
-    const response = await axios.get(`${API_BASE_URL}/history/${recordId}`, {
+    const response = await http.get(`${API_BASE_URL}/history/${recordId}`, {
       timeout: 10000 // 10秒超时
     })
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return { success: false, error: '请求超时，请检查网络连接' }
       }
@@ -405,7 +426,7 @@ export async function updateHistory(
   data: UpdateHistoryParams
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const response = await axios.put(
+    const response = await http.put(
       `${API_BASE_URL}/history/${recordId}`,
       data,
       {
@@ -414,7 +435,7 @@ export async function updateHistory(
     )
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return { success: false, error: '请求超时，请检查网络连接' }
       }
@@ -453,7 +474,7 @@ export async function updateHistory(
 export async function checkHistoryExists(recordId: string): Promise<boolean> {
   try {
     // 使用专用的 /exists 端点，避免获取完整记录数据
-    const response = await axios.get(
+    const response = await http.get(
       `${API_BASE_URL}/history/${recordId}/exists`,
       {
         timeout: 5000 // 5秒超时
@@ -461,7 +482,7 @@ export async function checkHistoryExists(recordId: string): Promise<boolean> {
     )
     return response.data.exists === true
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       // 404 表示记录不存在
       if (error.response?.status === 404) {
         return false
@@ -479,7 +500,7 @@ export async function deleteHistory(recordId: string): Promise<{
   error?: string
 }> {
   try {
-    const response = await axios.delete(
+    const response = await http.delete(
       `${API_BASE_URL}/history/${recordId}`,
       {
         timeout: 10000 // 10秒超时
@@ -487,7 +508,7 @@ export async function deleteHistory(recordId: string): Promise<{
     )
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return { success: false, error: '请求超时，请检查网络连接' }
       }
@@ -516,13 +537,13 @@ export async function searchHistory(keyword: string): Promise<{
   error?: string
 }> {
   try {
-    const response = await axios.get(`${API_BASE_URL}/history/search`, {
+    const response = await http.get(`${API_BASE_URL}/history/search`, {
       params: { keyword },
       timeout: 10000 // 10秒超时
     })
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return { success: false, records: [], error: '请求超时，请检查网络连接' }
       }
@@ -550,12 +571,12 @@ export async function getHistoryStats(): Promise<{
   error?: string
 }> {
   try {
-    const response = await axios.get(`${API_BASE_URL}/history/stats`, {
+    const response = await http.get(`${API_BASE_URL}/history/stats`, {
       timeout: 10000 // 10秒超时
     })
     return response.data
   } catch (error: any) {
-    if (axios.isAxiosError(error)) {
+    if (isAxiosError(error)) {
       if (error.code === 'ECONNABORTED') {
         return { success: false, total: 0, by_status: {}, error: '请求超时，请检查网络连接' }
       }
@@ -580,7 +601,8 @@ export async function generateImagesPost(
   onFinish: (event: FinishEvent) => void,
   onStreamError: (error: Error) => void,
   userImages?: File[],
-  userTopic?: string
+  userTopic?: string,
+  styleHint?: string
 ) {
   try {
     // 将用户图片转换为 base64
@@ -598,17 +620,24 @@ export async function generateImagesPost(
       )
     }
 
+    const token = getAuthToken()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) {
+      headers.Authorization = `Bearer ${token}`
+    }
+
     const response = await fetch(`${API_BASE_URL}/generate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         pages,
         task_id: taskId,
         full_outline: fullOutline,
         user_images: userImagesBase64.length > 0 ? userImagesBase64 : undefined,
-        user_topic: userTopic || ''
+        user_topic: userTopic || '',
+        style_hint: styleHint || ''
       })
     })
 
@@ -627,6 +656,19 @@ export async function generateImagesPost(
   }
 }
 
+export async function cancelTask(taskId: string): Promise<{ success: boolean; task_id?: string; error?: string }> {
+  try {
+    const resp = await http.post(`${API_BASE_URL}/task/${encodeURIComponent(taskId)}/cancel`)
+    return resp.data
+  } catch (error: any) {
+    if (isAxiosError(error)) {
+      const errorMessage = error.response?.data?.error || error.message || '取消任务失败'
+      return { success: false, error: errorMessage }
+    }
+    return { success: false, error: '未知错误，请稍后重试' }
+  }
+}
+
 // 扫描所有任务并同步图片列表
 export async function scanAllTasks(): Promise<{
   success: boolean
@@ -637,8 +679,65 @@ export async function scanAllTasks(): Promise<{
   results?: any[]
   error?: string
 }> {
-  const response = await axios.post(`${API_BASE_URL}/history/scan-all`)
+  const response = await http.post(`${API_BASE_URL}/history/scan-all`)
   return response.data
+}
+
+export async function downloadHistoryZip(recordId: string): Promise<{
+  success: boolean
+  blob?: Blob
+  filename?: string
+  error?: string
+}> {
+  try {
+    const resp = await http.get(`${API_BASE_URL}/history/${encodeURIComponent(recordId)}/download`, {
+      responseType: 'blob',
+      timeout: 60000
+    })
+
+    const cd = (resp.headers as any)?.['content-disposition'] as string | undefined
+    const filename = _filenameFromContentDisposition(cd) || 'images.zip'
+    return { success: true, blob: resp.data as Blob, filename }
+  } catch (error: any) {
+    if (isAxiosError(error)) {
+      let message: string | undefined
+      const data = error.response?.data as any
+      if (typeof data?.error === 'string') {
+        message = data.error
+      } else if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        try {
+          const text = await data.text()
+          const parsed = JSON.parse(text)
+          if (typeof parsed?.error === 'string') {
+            message = parsed.error
+          }
+        } catch {
+          // ignore blob/json parsing failures
+        }
+      }
+
+      const errorMessage = message || error.message || '下载失败'
+      return { success: false, error: errorMessage }
+    }
+    return { success: false, error: '未知错误，请稍后重试' }
+  }
+}
+
+function _filenameFromContentDisposition(value?: string): string | null {
+  if (!value) return null
+
+  // RFC 5987: filename*=UTF-8''...
+  const matchStar = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(value)
+  if (matchStar && matchStar[1]) {
+    try {
+      return decodeURIComponent(matchStar[1].trim())
+    } catch {
+      return matchStar[1].trim()
+    }
+  }
+
+  const match = /filename\s*=\s*\"?([^\";]+)\"?/i.exec(value)
+  return match && match[1] ? match[1].trim() : null
 }
 
 // ==================== 配置管理 API ====================
@@ -682,12 +781,12 @@ export interface AdminHealthResponse {
 }
 
 export async function getAdminHealth(): Promise<AdminHealthResponse> {
-  const resp = await axios.get(`${API_BASE_URL}/admin/health`)
+  const resp = await http.get(`${API_BASE_URL}/admin/health`)
   return resp.data
 }
 
 export async function listAdminTasks(): Promise<{ success: boolean; tasks?: AdminTask[]; error?: string }> {
-  const resp = await axios.get(`${API_BASE_URL}/admin/tasks`)
+  const resp = await http.get(`${API_BASE_URL}/admin/tasks`)
   return resp.data
 }
 
@@ -695,7 +794,7 @@ export async function cleanupAdminTask(
   taskId: string,
   deleteFiles: boolean = false
 ): Promise<{ success: boolean; task_id?: string; existed_in_memory?: boolean; deleted_files?: boolean; error?: string }> {
-  const resp = await axios.delete(`${API_BASE_URL}/admin/tasks/${encodeURIComponent(taskId)}`, {
+  const resp = await http.delete(`${API_BASE_URL}/admin/tasks/${encodeURIComponent(taskId)}`, {
     params: { delete_files: deleteFiles ? 'true' : 'false' }
   })
   return resp.data
@@ -705,7 +804,7 @@ export async function getAdminLogs(params?: {
   offset?: number
   max_bytes?: number
 }): Promise<{ success: boolean; log_file?: string; offset?: number; next_offset?: number; content?: string; size?: number; exists?: boolean; error?: string }> {
-  const resp = await axios.get(`${API_BASE_URL}/admin/logs`, { params })
+  const resp = await http.get(`${API_BASE_URL}/admin/logs`, { params })
   return resp.data
 }
 
@@ -714,12 +813,12 @@ export function getAdminLogsDownloadUrl(): string {
 }
 
 export async function rotateAdminLogs(): Promise<{ success: boolean; rotated?: boolean; log_file?: string; error?: string }> {
-  const resp = await axios.post(`${API_BASE_URL}/admin/logs/rotate`, {})
+  const resp = await http.post(`${API_BASE_URL}/admin/logs/rotate`, {})
   return resp.data
 }
 
 export async function getAdminHistoryStats(): Promise<{ success: boolean; stats?: any; error?: string }> {
-  const resp = await axios.get(`${API_BASE_URL}/admin/history/stats`)
+  const resp = await http.get(`${API_BASE_URL}/admin/history/stats`)
   return resp.data
 }
 
@@ -733,7 +832,7 @@ export async function cleanupAdminHistory(params: {
   confirm_delete_orphans?: string
   confirm_delete_any?: string
 }): Promise<{ success: boolean; dry_run?: boolean; deleted?: any[]; failed?: any[]; error?: string }> {
-  const resp = await axios.post(`${API_BASE_URL}/admin/history/cleanup`, params)
+  const resp = await http.post(`${API_BASE_URL}/admin/history/cleanup`, params)
   return resp.data
 }
 
@@ -743,7 +842,7 @@ export async function getConfig(): Promise<{
   config?: Config
   error?: string
 }> {
-  const response = await axios.get(`${API_BASE_URL}/config`)
+  const response = await http.get(`${API_BASE_URL}/config`)
   return response.data
 }
 
@@ -753,7 +852,7 @@ export async function updateConfig(config: Partial<Config>): Promise<{
   message?: string
   error?: string
 }> {
-  const response = await axios.post(`${API_BASE_URL}/config`, config)
+  const response = await http.post(`${API_BASE_URL}/config`, config)
   return response.data
 }
 
@@ -769,7 +868,7 @@ export async function testConnection(config: {
   message?: string
   error?: string
 }> {
-  const response = await axios.post(`${API_BASE_URL}/config/test`, config)
+  const response = await http.post(`${API_BASE_URL}/config/test`, config)
   return response.data
 }
 
@@ -788,7 +887,7 @@ export async function generateContent(
   topic: string,
   outline: string
 ): Promise<ContentResponse> {
-  const response = await axios.post<ContentResponse>(`${API_BASE_URL}/content`, {
+  const response = await http.post<ContentResponse>(`${API_BASE_URL}/content`, {
     topic,
     outline
   })

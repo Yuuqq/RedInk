@@ -213,6 +213,23 @@ pnpm dev
 - `REDINK_ADMIN_TRUST_XFF=1`：信任 `X-Forwarded-For`（仅在你完全控制反代时）
 - `REDINK_ADMIN_ALLOW_REMOTE=1`：允许任意远程访问
 
+⚠️ 若启用上述“远程管理访问”，请务必同时设置 `REDINK_AUTH_TOKEN`，否则管理接口将被拒绝（避免误开放）。
+
+### API 访问控制（上线强烈推荐）
+
+如果你的服务不是只在本机使用（例如部署到服务器或对外网开放端口），强烈建议设置：
+
+- `REDINK_AUTH_TOKEN=<your-token>`：启用大多数 `/api/*` 的 Bearer Token 认证（默认豁免 `/api/health` 与 `/api/images/*`，便于 healthcheck 与 `<img>` 加载）。
+
+前端「系统设置」页面顶部提供了“访问控制”输入框：填入同样的 Token 后即可正常调用 API（包括生成/历史/管理面板等；Token 仅保存在当前浏览器本地存储）。
+
+### 上传/请求体大小限制
+
+默认最大请求体为 32MB（用于限制上传图片/JSON base64 图片等，防止异常大请求拖垮服务）。如需调整：
+
+- `REDINK_MAX_CONTENT_LENGTH=<bytes>`：最大请求体字节数（例如 `67108864` 表示 64MB）
+- `REDINK_MAX_BASE64_IMAGES` / `REDINK_MAX_BASE64_IMAGE_BYTES` / `REDINK_MAX_BASE64_TOTAL_BYTES`：JSON base64 图片数量与大小限制
+
 ### CLIProxyAPI / OpenAI-Compatible 代理快速接入
 
 如果你有本地代理（例如 CLIProxyAPI），可以在 `/admin` 的“快速接入”中一键写入配置，

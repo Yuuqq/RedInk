@@ -61,7 +61,9 @@ def create_history_blueprint():
         }
         """
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({"success": False, "error": "请求体必须是 JSON object"}), 400
             topic = data.get('topic')
             outline = data.get('outline')
             task_id = data.get('task_id')
@@ -229,9 +231,12 @@ def create_history_blueprint():
         }
         """
         try:
-            data = request.get_json()
+            data = request.get_json(silent=True)
+            if not isinstance(data, dict):
+                return jsonify({"success": False, "error": "请求体必须是 JSON object"}), 400
             outline = data.get('outline')
             images = data.get('images')
+            content = data.get('content')
             status = data.get('status')
             thumbnail = data.get('thumbnail')
 
@@ -240,6 +245,7 @@ def create_history_blueprint():
                 record_id,
                 outline=outline,
                 images=images,
+                content=content,
                 status=status,
                 thumbnail=thumbnail
             )
@@ -376,6 +382,9 @@ def create_history_blueprint():
             result = history_service.scan_and_sync_task_images(task_id)
 
             if not result.get("success"):
+                err = str(result.get("error") or "")
+                if "路径不安全" in err:
+                    return jsonify(result), 400
                 return jsonify(result), 404
 
             return jsonify(result), 200
@@ -455,7 +464,7 @@ def create_history_blueprint():
                 }), 404
 
             # 创建内存中的 ZIP 文件
-            zip_buffer = _create_images_zip(task_dir)
+            zip_buffer = _create_images_zip(task_dir, record)
 
             # 生成安全的下载文件名
             title = record.get('title', 'images')
@@ -479,7 +488,7 @@ def create_history_blueprint():
     return history_bp
 
 
-def _create_images_zip(task_dir: str) -> io.BytesIO:
+def _create_images_zip(task_dir: str, record: Optional[dict] = None) -> io.BytesIO:
     """
     创建包含所有图片的 ZIP 文件
 
@@ -496,6 +505,59 @@ def _create_images_zip(task_dir: str) -> io.BytesIO:
         raise ValueError("任务目录为符号链接，已拒绝打包")
 
     with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 附带元信息
+        if record:
+            try:
+                title = record.get("title", "")
+                record_id = record.get("id", "")
+                created_at = record.get("created_at", "")
+                updated_at = record.get("updated_at", "")
+                status = record.get("status", "")
+                task_id = (record.get("images") or {}).get("task_id", "")
+                pages = (record.get("outline") or {}).get("pages") or []
+                page_count = len(pages)
+                style_hint = record.get("style_hint", "")
+
+                meta_lines = [
+                    f"Title: {title}",
+                    f"Record ID: {record_id}",
+                    f"Status: {status}",
+                    f"Created At: {created_at}",
+                    f"Updated At: {updated_at}",
+                    f"Task ID: {task_id}",
+                    f"Pages: {page_count}",
+                ]
+                if style_hint:
+                    meta_lines.append(f"Style Hint: {style_hint}")
+                zf.writestr("meta.txt", "\n".join(meta_lines) + "\n")
+
+                outline_raw = (record.get("outline") or {}).get("raw", "")
+                if outline_raw:
+                    zf.writestr("outline.txt", str(outline_raw))
+
+                content = record.get("content") or {}
+                titles = content.get("titles") or []
+                copywriting = content.get("copywriting") or ""
+                tags = content.get("tags") or []
+                if titles or copywriting or tags:
+                    parts = []
+                    if titles:
+                        parts.append("Titles:")
+                        parts.extend([f"- {t}" for t in titles])
+                        parts.append("")
+                    if copywriting:
+                        parts.append("Copywriting:")
+                        parts.append(str(copywriting))
+                        parts.append("")
+                    if tags:
+                        parts.append("Tags:")
+                        parts.append(" ".join([f"#{t}" for t in tags]))
+                        parts.append("")
+                    zf.writestr("content.txt", "\n".join(parts).strip() + "\n")
+            except Exception:
+                # 元信息写入失败不影响图片打包
+                pass
+
         # 遍历任务目录中的所有图片（排除缩略图）
         for filename in os.listdir(task_dir):
             # 跳过缩略图文件

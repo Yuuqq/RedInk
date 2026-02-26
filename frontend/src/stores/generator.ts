@@ -45,6 +45,9 @@ export interface GeneratorState {
   // 用户输入的主题
   topic: string
 
+  // 图片生成风格偏好（可选）
+  styleHint: string
+
   // 大纲数据（包含原始文本和解析后的页面列表）
   outline: {
     raw: string      // 原始大纲文本
@@ -102,6 +105,7 @@ function saveState(state: GeneratorState) {
     const toSave = {
       stage: state.stage,                    // 当前阶段
       topic: state.topic,                    // 用户输入的主题
+      styleHint: state.styleHint,            // 风格偏好
       outline: state.outline,                // 大纲数据
       progress: state.progress,              // 生成进度
       images: state.images,                  // 生成的图片结果
@@ -126,6 +130,9 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 用户输入的主题
       topic: saved.topic || '',
+
+      // 风格偏好
+      styleHint: (saved as any).styleHint || '',
 
       // 大纲数据
       outline: saved.outline || {
@@ -169,6 +176,10 @@ export const useGeneratorStore = defineStore('generator', {
   },
 
   actions: {
+    recalculateProgressCurrent() {
+      this.progress.current = this.images.filter(img => img.status === 'done').length
+    },
+
     /**
      * 设置用户输入的主题
      * @param topic 主题内容
@@ -299,6 +310,7 @@ export const useGeneratorStore = defineStore('generator', {
         url: '',
         status: 'generating'
       }))
+      this.recalculateProgressCurrent()
     },
 
     /**
@@ -320,10 +332,7 @@ export const useGeneratorStore = defineStore('generator', {
         }
         if (error) image.error = error
       }
-      // 成功完成时增加计数
-      if (status === 'done') {
-        this.progress.current++
-      }
+      this.recalculateProgressCurrent()
     },
 
     /**
@@ -340,6 +349,7 @@ export const useGeneratorStore = defineStore('generator', {
         image.status = 'done'
         delete image.error
       }
+      this.recalculateProgressCurrent()
     },
 
     /**
@@ -400,6 +410,9 @@ export const useGeneratorStore = defineStore('generator', {
 
       // 清空用户输入的主题
       this.topic = ''
+
+      // 重置风格偏好
+      this.styleHint = ''
 
       // 清空大纲数据
       this.outline = {
@@ -570,6 +583,7 @@ export function setupAutoSave() {
     () => ({
       stage: store.stage,                    // 当前阶段
       topic: store.topic,                    // 用户输入的主题
+      styleHint: store.styleHint,            // 风格偏好
       outline: store.outline,                // 大纲数据
       progress: store.progress,              // 生成进度
       images: store.images,                  // 生成的图片结果

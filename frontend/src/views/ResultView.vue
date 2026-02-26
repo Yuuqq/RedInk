@@ -185,7 +185,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import { regenerateImage } from '../api'
+import { regenerateImage, updateHistory, downloadHistoryZip } from '../api'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
 
 const router = useRouter()
@@ -214,9 +214,19 @@ const downloadOne = (image: any) => {
 
 const downloadAll = () => {
   if (store.recordId) {
-    const link = document.createElement('a')
-    link.href = `/api/history/${store.recordId}/download`
-    link.click()
+    downloadHistoryZip(store.recordId).then((res) => {
+      if (!res.success || !res.blob) {
+        alert('下载失败: ' + (res.error || '未知错误'))
+        return
+      }
+
+      const url = URL.createObjectURL(res.blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = res.filename || 'images.zip'
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    })
   } else {
     store.images.forEach((image, index) => {
       if (image.url) {
@@ -254,6 +264,22 @@ const handleRegenerate = async (image: any) => {
     if (result.success && result.image_url) {
        const newUrl = result.image_url
        store.updateImage(image.index, newUrl)
+
+       if (store.recordId) {
+         const generated: Array<string | null> = new Array(store.images.length).fill(null)
+         store.images.forEach((img) => {
+           if (!img.url) return
+           const base = img.url.split('?')[0]
+           const filename = base.split('/').pop() || null
+           generated[img.index] = filename
+         })
+         await updateHistory(store.recordId, {
+           images: {
+             task_id: store.taskId,
+             generated
+           }
+         })
+       }
     } else {
        alert('重绘失败: ' + (result.error || '未知错误'))
     }

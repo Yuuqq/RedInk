@@ -126,7 +126,7 @@ interface ViewingRecord {
   }
   images: {
     task_id: string
-    generated: string[]
+    generated: Array<string | null>
   }
 }
 

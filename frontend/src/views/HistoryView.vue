@@ -28,38 +28,53 @@
 
     <!-- Toolbar: Tabs & Search -->
     <div class="toolbar-wrapper">
-      <div class="tabs-container history-tabs">
-        <div
+      <div class="tabs-container history-tabs" role="tablist" aria-label="历史记录筛选">
+        <button
+          type="button"
           class="tab-item"
           :class="{ active: currentTab === 'all' }"
+          role="tab"
+          :aria-selected="currentTab === 'all'"
+          :tabindex="currentTab === 'all' ? 0 : -1"
           @click="switchTab('all')"
         >
           全部
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
           class="tab-item"
           :class="{ active: currentTab === 'completed' }"
+          role="tab"
+          :aria-selected="currentTab === 'completed'"
+          :tabindex="currentTab === 'completed' ? 0 : -1"
           @click="switchTab('completed')"
         >
           已完成
-        </div>
-        <div
+        </button>
+        <button
+          type="button"
           class="tab-item"
           :class="{ active: currentTab === 'draft' }"
+          role="tab"
+          :aria-selected="currentTab === 'draft'"
+          :tabindex="currentTab === 'draft' ? 0 : -1"
           @click="switchTab('draft')"
         >
           草稿箱
-        </div>
+        </button>
       </div>
 
       <div class="search-mini">
-        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input
-          v-model="searchKeyword"
-          type="text"
-          placeholder="搜索标题..."
-          @keyup.enter="handleSearch"
-        />
+        <div class="search-input">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input
+            v-model="searchKeyword"
+            type="text"
+            placeholder="搜索标题..."
+            @keyup.enter="handleSearch"
+          />
+        </div>
+        <div v-if="searchError" class="search-error">{{ searchError }}</div>
       </div>
     </div>
 
@@ -130,7 +145,8 @@ import {
   type HistoryRecord,
   regenerateImage as apiRegenerateImage,
   updateHistory,
-  scanAllTasks
+  scanAllTasks,
+  downloadHistoryZip
 } from '../api'
 import { useGeneratorStore } from '../stores/generator'
 
@@ -150,6 +166,7 @@ const loading = ref(false)
 const stats = ref<any>(null)
 const currentTab = ref('all')
 const searchKeyword = ref('')
+const searchError = ref('')
 const currentPage = ref(1)
 const totalPages = ref(1)
 
@@ -202,17 +219,29 @@ function switchTab(tab: string) {
  */
 async function handleSearch() {
   if (!searchKeyword.value.trim()) {
+    searchError.value = ''
+    currentPage.value = 1
     loadData()
     return
   }
   loading.value = true
   try {
     const res = await searchHistory(searchKeyword.value)
+    currentPage.value = 1
+    totalPages.value = 1
     if (res.success) {
       records.value = res.records
-      totalPages.value = 1
+      searchError.value = ''
+    } else {
+      records.value = []
+      searchError.value = res.error || '搜索失败，请稍后重试'
     }
-  } catch(e) {} finally {
+  } catch (e) {
+    records.value = []
+    totalPages.value = 1
+    currentPage.value = 1
+    searchError.value = '搜索失败，请稍后重试'
+  } finally {
     loading.value = false
   }
 }
@@ -305,16 +334,18 @@ async function regenerateHistoryImage(index: number) {
     )
 
     if (result.success && result.image_url) {
-      const filename = result.image_url.split('/').pop()
+      const filename = result.image_url.split('/').pop() || null
       viewingRecord.value.images.generated[index] = filename
 
       // 刷新图片
       const timestamp = Date.now()
-      const imgElements = document.querySelectorAll(`img[src*="${viewingRecord.value.images.task_id}/${filename}"]`)
-      imgElements.forEach(img => {
-        const baseUrl = (img as HTMLImageElement).src.split('?')[0]
-        ;(img as HTMLImageElement).src = `${baseUrl}?t=${timestamp}`
-      })
+      if (filename) {
+        const imgElements = document.querySelectorAll(`img[src*="${viewingRecord.value.images.task_id}/${filename}"]`)
+        imgElements.forEach(img => {
+          const baseUrl = (img as HTMLImageElement).src.split('?')[0]
+          ;(img as HTMLImageElement).src = `${baseUrl}?t=${timestamp}`
+        })
+      }
 
       await updateHistory(viewingRecord.value.id, {
         images: {
@@ -348,11 +379,20 @@ function downloadImage(filename: string, index: number) {
 /**
  * 打包下载所有图片
  */
-function downloadAllImages() {
+async function downloadAllImages() {
   if (!viewingRecord.value) return
+  const res = await downloadHistoryZip(viewingRecord.value.id)
+  if (!res.success || !res.blob) {
+    alert('下载失败: ' + (res.error || '未知错误'))
+    return
+  }
+
+  const url = URL.createObjectURL(res.blob)
   const link = document.createElement('a')
-  link.href = `/api/history/${viewingRecord.value.id}/download`
+  link.href = url
+  link.download = res.filename || 'images.zip'
   link.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 /**
@@ -443,12 +483,15 @@ onMounted(async () => {
 }
 
 .search-mini {
-  position: relative;
   width: 240px;
   margin-bottom: 10px;
 }
 
-.search-mini input {
+.search-input {
+  position: relative;
+}
+
+.search-input input {
   width: 100%;
   padding: 8px 12px 8px 36px;
   border-radius: 100px;
@@ -458,13 +501,19 @@ onMounted(async () => {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.search-mini input:focus {
+.search-input input:focus {
   border-color: var(--primary);
   outline: none;
   box-shadow: 0 0 0 3px var(--primary-light);
 }
 
-.search-mini .icon {
+.search-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #d1242f;
+}
+
+.search-input .icon {
   position: absolute;
   left: 12px;
   top: 50%;
