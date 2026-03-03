@@ -4,6 +4,7 @@ import base64
 from typing import Dict, Any
 import requests
 from .base import ImageGeneratorBase
+from backend.utils.url import normalize_openai_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +23,14 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
                 "解决方案：在系统设置页面编辑该服务商，填写 API Key"
             )
 
+        self.base_url = normalize_openai_base_url(self.base_url)
+
         if not self.base_url:
             logger.error("OpenAI 兼容 API Base URL 未配置")
             raise ValueError(
                 "OpenAI 兼容 API Base URL 未配置。\n"
                 "解决方案：在系统设置页面编辑该服务商，填写 Base URL"
             )
-
-        # 规范化 base_url：去除末尾 /v1
-        self.base_url = self.base_url.rstrip('/').rstrip('/v1')
 
         # 默认模型
         self.default_model = config.get('model', 'dall-e-3')

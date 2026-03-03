@@ -25,6 +25,7 @@ import requests
 from flask import Blueprint, jsonify, request, send_file
 
 from backend.services.image import get_image_service
+from backend.utils.url import normalize_openai_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -240,10 +241,10 @@ def _probe_openai_compatible_models(base_url: str, api_key: str) -> Dict[str, An
     Best-effort probe for OpenAI-compatible upstream (/v1/models).
     base_url can be with or without /v1.
     """
-    if not base_url:
+    base = normalize_openai_base_url(base_url)
+    if not base:
         return {"ok": False, "error": "base_url 为空"}
 
-    base = base_url.rstrip("/").rstrip("/v1")
     url = f"{base}/v1/models"
 
     try:

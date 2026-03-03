@@ -13,6 +13,7 @@ from pathlib import Path
 import yaml
 from flask import Blueprint, request, jsonify
 from backend.middleware import require_auth
+from backend.utils.url import normalize_openai_base_url
 from .utils import prepare_providers_for_response
 
 logger = logging.getLogger(__name__)
@@ -376,7 +377,7 @@ def _test_openai_compatible(config: dict, test_prompt: str) -> dict:
     """测试 OpenAI 兼容接口"""
     import requests
 
-    base_url = config['base_url'].rstrip('/').rstrip('/v1') if config.get('base_url') else 'https://api.openai.com'
+    base_url = normalize_openai_base_url(config.get('base_url'), default='https://api.openai.com')
     url = f"{base_url}/v1/chat/completions"
 
     payload = {
@@ -408,7 +409,7 @@ def _test_image_api(config: dict) -> dict:
     """测试图片 API 连接"""
     import requests
 
-    base_url = config['base_url'].rstrip('/').rstrip('/v1') if config.get('base_url') else 'https://api.openai.com'
+    base_url = normalize_openai_base_url(config.get('base_url'), default='https://api.openai.com')
     url = f"{base_url}/v1/models"
 
     response = requests.get(

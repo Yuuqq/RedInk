@@ -7,6 +7,7 @@ import requests
 from functools import wraps
 from typing import List, Optional, Union
 from .image_compressor import compress_image
+from .url import normalize_openai_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ class TextChatClient:
                 "解决方案：在系统设置页面编辑文本生成服务商，填写 API Key"
             )
 
-        self.base_url = (base_url or "https://api.openai.com").rstrip('/').rstrip('/v1')
+        self.base_url = normalize_openai_base_url(base_url, default="https://api.openai.com")
 
         # 支持自定义端点路径
         endpoint = endpoint_type or '/v1/chat/completions'
