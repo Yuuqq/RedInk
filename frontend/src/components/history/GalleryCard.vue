@@ -5,7 +5,7 @@
     <div class="card-cover" @click="$emit('preview', record.id)">
       <img
         v-if="record.thumbnail && record.task_id"
-        :src="`/api/images/${record.task_id}/${record.thumbnail}`"
+        :src="getImageUrl(record.task_id, record.thumbnail, true)"
         alt="cover"
         loading="lazy"
         decoding="async"
@@ -53,6 +53,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { getImageUrl } from '../../api'
 
 /**
  * 历史记录卡片组件

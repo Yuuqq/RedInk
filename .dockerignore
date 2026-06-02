@@ -12,6 +12,8 @@ __pycache__
 venv
 ENV
 .uv
+.tmp
+*.tmp
 
 # Node
 node_modules
@@ -34,6 +36,7 @@ history
 .env
 .env.local
 .env.*.local
+config
 
 # 日志
 *.log

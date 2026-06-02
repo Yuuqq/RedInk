@@ -166,20 +166,24 @@ async function handleGenerate() {
     const result = await generateContent(store.topic, store.outline.raw)
 
     if (result.success && result.titles && result.copywriting && result.tags) {
+      if (store.recordId) {
+        const saveResult = await updateHistory(store.recordId, {
+          content: {
+            titles: result.titles,
+            copywriting: result.copywriting,
+            tags: result.tags
+          }
+        })
+
+        if (!saveResult.success) {
+          store.setContentError('内容已生成，但保存到历史记录失败: ' + (saveResult.error || '未知错误'))
+          return
+        }
+      }
+
       store.setContent(result.titles, result.copywriting, result.tags)
       if (store.recordId) {
-        try {
-          await updateHistory(store.recordId, {
-            content: {
-              titles: result.titles,
-              copywriting: result.copywriting,
-              tags: result.tags
-            }
-          })
-        } catch (e) {
-          // 保存失败不阻断使用，仅记录
-          console.error('保存内容到历史记录失败:', e)
-        }
+        store.markSaved()
       }
     } else {
       store.setContentError(result.error || '生成失败')

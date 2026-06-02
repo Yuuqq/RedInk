@@ -60,3 +60,20 @@ def test_scan_and_sync_rejects_unsafe_task_id(history_service):
     assert result["success"] is False
     assert "路径不安全" in result["error"]
 
+
+def test_scan_and_sync_skips_malformed_index_entries(history_service, sample_outline, temp_history_dir):
+    task_id = "task_malformed_index"
+    record_id = history_service.create_record("Malformed index", sample_outline, task_id=task_id)
+
+    index = history_service._load_index()
+    index["records"].insert(0, {"title": "missing id"})
+    history_service._save_index(index)
+
+    task_dir = os.path.join(temp_history_dir, task_id)
+    _touch(os.path.join(task_dir, "0.png"))
+
+    result = history_service.scan_and_sync_task_images(task_id)
+
+    assert result["success"] is True
+    assert result["record_id"] == record_id
+

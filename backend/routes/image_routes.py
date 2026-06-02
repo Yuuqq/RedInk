@@ -34,13 +34,13 @@ def create_image_blueprint():
         """
         防止路径遍历：确保最终路径在 history_root 内，且只允许预期文件名。
 
-        仅允许：{index}.png 或 thumb_{index}.png
+        仅允许：{index}.png/.jpg/.jpeg 或 thumb_{index}.png/.jpg/.jpeg
         """
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", task_id or ""):
             return None
 
         # NOTE: use single backslashes in raw regex. `\\d` would match the literal string "\d".
-        if not re.fullmatch(r"(thumb_)?\d+\.png", filename or ""):
+        if not re.fullmatch(r"(thumb_)?\d+\.(png|jpg|jpeg)", filename or "", flags=re.IGNORECASE):
             return None
 
         base = history_root.resolve()
@@ -94,16 +94,15 @@ def create_image_blueprint():
 
             if task_id is not None and task_id != "" and not _is_safe_task_id(task_id):
                 return jsonify({"success": False, "error": "参数错误：task_id 不安全"}), 400
+            if not isinstance(full_outline, str):
+                return jsonify({"success": False, "error": "参数错误：full_outline 必须是字符串"}), 400
+            if not isinstance(user_topic, str):
+                return jsonify({"success": False, "error": "参数错误：user_topic 必须是字符串"}), 400
+            if not isinstance(style_hint, str):
+                return jsonify({"success": False, "error": "参数错误：style_hint 必须是字符串"}), 400
 
             # 解析 base64 格式的用户参考图片
             user_images = _parse_base64_images(data.get('user_images', []))
-
-            log_request('/generate', {
-                'pages_count': len(pages) if pages else 0,
-                'task_id': task_id,
-                'user_topic': user_topic[:50] if user_topic else None,
-                'user_images': user_images
-            })
 
             if not pages or not isinstance(pages, list):
                 logger.warning("图片生成请求缺少 pages 参数")
@@ -111,6 +110,17 @@ def create_image_blueprint():
                     "success": False,
                     "error": "参数错误：pages 不能为空。\n请提供要生成的页面列表数据。"
                 }), 400
+
+            validation_error = _validate_pages_payload(pages)
+            if validation_error:
+                return jsonify({"success": False, "error": validation_error}), 400
+
+            log_request('/generate', {
+                'pages_count': len(pages),
+                'task_id': task_id,
+                'user_topic': user_topic[:50] if user_topic else None,
+                'user_images': user_images
+            })
 
             logger.info(f"🖼️  开始图片生成任务: {task_id}, 共 {len(pages)} 页")
             image_service = get_image_service()
@@ -182,7 +192,7 @@ def create_image_blueprint():
                 thumb_filename = f"thumb_{filename}"
                 safe_thumb = _safe_image_path(history_root, task_id, thumb_filename)
                 if safe_thumb:
-                    return send_file(str(safe_thumb), mimetype='image/png')
+                    return send_file(str(safe_thumb), mimetype=_image_mimetype(safe_thumb.name))
 
             safe_file = _safe_image_path(history_root, task_id, filename)
             if not safe_file:
@@ -191,7 +201,7 @@ def create_image_blueprint():
                     "error": f"图片不存在或路径不安全：{task_id}/{filename}"
                 }), 404
 
-            return send_file(str(safe_file), mimetype='image/png')
+            return send_file(str(safe_file), mimetype=_image_mimetype(safe_file.name))
 
         except Exception as e:
             log_error('/images', e)
@@ -226,11 +236,6 @@ def create_image_blueprint():
             use_reference = data.get('use_reference', True)
             style_hint = data.get('style_hint', '')
 
-            log_request('/retry', {
-                'task_id': task_id,
-                'page_index': page.get('index') if isinstance(page, dict) else None
-            })
-
             if not task_id or not isinstance(page, dict):
                 logger.warning("重试请求缺少必要参数")
                 return jsonify({
@@ -240,6 +245,15 @@ def create_image_blueprint():
 
             if not _is_safe_task_id(task_id):
                 return jsonify({"success": False, "error": "参数错误：task_id 不安全"}), 400
+
+            validation_error = _validate_page_payload(page)
+            if validation_error:
+                return jsonify({"success": False, "error": validation_error}), 400
+
+            log_request('/retry', {
+                'task_id': task_id,
+                'page_index': page.get('index') if isinstance(page, dict) else None
+            })
 
             logger.info(f"🔄 重试生成图片: task={task_id}, page={page.get('index')}")
             image_service = get_image_service()
@@ -279,11 +293,6 @@ def create_image_blueprint():
             task_id = data.get('task_id')
             pages = data.get('pages')
 
-            log_request('/retry-failed', {
-                'task_id': task_id,
-                'pages_count': len(pages) if pages else 0
-            })
-
             if not task_id or not pages or not isinstance(pages, list):
                 logger.warning("批量重试请求缺少必要参数")
                 return jsonify({
@@ -293,6 +302,15 @@ def create_image_blueprint():
 
             if not _is_safe_task_id(task_id):
                 return jsonify({"success": False, "error": "参数错误：task_id 不安全"}), 400
+
+            validation_error = _validate_pages_payload(pages)
+            if validation_error:
+                return jsonify({"success": False, "error": validation_error}), 400
+
+            log_request('/retry-failed', {
+                'task_id': task_id,
+                'pages_count': len(pages)
+            })
 
             logger.info(f"🔄 批量重试失败图片: task={task_id}, 共 {len(pages)} 页")
             image_service = get_image_service()
@@ -350,11 +368,6 @@ def create_image_blueprint():
             user_topic = data.get('user_topic', '')
             style_hint = data.get('style_hint', '')
 
-            log_request('/regenerate', {
-                'task_id': task_id,
-                'page_index': page.get('index') if isinstance(page, dict) else None
-            })
-
             if not task_id or not isinstance(page, dict):
                 logger.warning("重新生成请求缺少必要参数")
                 return jsonify({
@@ -364,6 +377,15 @@ def create_image_blueprint():
 
             if not _is_safe_task_id(task_id):
                 return jsonify({"success": False, "error": "参数错误：task_id 不安全"}), 400
+
+            validation_error = _validate_page_payload(page)
+            if validation_error:
+                return jsonify({"success": False, "error": validation_error}), 400
+
+            log_request('/regenerate', {
+                'task_id': task_id,
+                'page_index': page.get('index') if isinstance(page, dict) else None
+            })
 
             logger.info(f"🔄 重新生成图片: task={task_id}, page={page.get('index')}")
             image_service = get_image_service()
@@ -395,6 +417,9 @@ def create_image_blueprint():
     def cancel_task(task_id):
         """取消正在进行的生成任务（尽量停止后续页面生成）"""
         try:
+            if not _is_safe_task_id(task_id):
+                return jsonify({"success": False, "error": "参数错误：task_id 不安全"}), 400
+
             image_service = get_image_service()
             ok = image_service.cancel_task(task_id)
             if not ok:
@@ -430,6 +455,9 @@ def create_image_blueprint():
           - has_cover: 是否有封面图
         """
         try:
+            if not _is_safe_task_id(task_id):
+                return jsonify({"success": False, "error": "参数错误：task_id 不安全"}), 400
+
             image_service = get_image_service()
             state = image_service.get_task_state(task_id)
 
@@ -530,3 +558,42 @@ def _parse_base64_images(images_base64: list) -> list:
         images.append(img)
 
     return images
+
+
+def _image_mimetype(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    if ext in (".jpg", ".jpeg"):
+        return "image/jpeg"
+    return "image/png"
+
+
+def _validate_page_payload(page: dict) -> str | None:
+    if not isinstance(page, dict):
+        return "参数错误：page 必须是 JSON object"
+    if "index" not in page or not isinstance(page.get("index"), int) or page.get("index") < 0:
+        return "参数错误：page.index 必须是非负整数"
+    if "type" not in page or not isinstance(page.get("type"), str) or not page.get("type"):
+        return "参数错误：page.type 必须是字符串"
+    if "content" not in page or not isinstance(page.get("content"), str):
+        return "参数错误：page.content 必须是字符串"
+    return None
+
+
+def _validate_pages_payload(pages: list) -> str | None:
+    if not isinstance(pages, list) or not pages:
+        return "参数错误：pages 不能为空。请提供要生成的页面列表数据。"
+
+    seen_indices = set()
+    for page in pages:
+        error = _validate_page_payload(page)
+        if error:
+            return error
+        index = page.get("index")
+        if index in seen_indices:
+            return "参数错误：pages 中的 index 不能重复"
+        seen_indices.add(index)
+
+    if seen_indices != set(range(len(pages))):
+        return "参数错误：pages.index 必须从 0 开始连续"
+
+    return None

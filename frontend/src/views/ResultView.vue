@@ -185,7 +185,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeneratorStore } from '../stores/generator'
-import { regenerateImage, updateHistory, downloadHistoryZip } from '../api'
+import { regenerateImage, updateHistory, downloadHistoryZip, getOriginalImageUrlFromDisplayUrl } from '../api'
 import ContentDisplay from '../components/result/ContentDisplay.vue'
 
 const router = useRouter()
@@ -193,8 +193,9 @@ const store = useGeneratorStore()
 const regeneratingIndex = ref<number | null>(null)
 
 const viewImage = (url: string) => {
-  const baseUrl = url.split('?')[0]
-  window.open(baseUrl + '?thumbnail=false', '_blank')
+  const originalUrl = getOriginalImageUrlFromDisplayUrl(url)
+  if (!originalUrl) return
+  window.open(originalUrl, '_blank', 'noopener,noreferrer')
 }
 
 const startOver = () => {
@@ -204,17 +205,19 @@ const startOver = () => {
 
 const downloadOne = (image: any) => {
   if (image.url) {
+    const originalUrl = getOriginalImageUrlFromDisplayUrl(image.url)
+    if (!originalUrl) return
     const link = document.createElement('a')
-    const baseUrl = image.url.split('?')[0]
-    link.href = baseUrl + '?thumbnail=false'
+    link.href = originalUrl
     link.download = `rednote_page_${image.index + 1}.png`
     link.click()
   }
 }
 
-const downloadAll = () => {
-  if (store.recordId) {
-    downloadHistoryZip(store.recordId).then((res) => {
+const downloadAll = async () => {
+  try {
+    if (store.recordId) {
+      const res = await downloadHistoryZip(store.recordId)
       if (!res.success || !res.blob) {
         alert('下载失败: ' + (res.error || '未知错误'))
         return
@@ -226,19 +229,63 @@ const downloadAll = () => {
       link.download = res.filename || 'images.zip'
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 0)
-    })
-  } else {
-    store.images.forEach((image, index) => {
-      if (image.url) {
-        setTimeout(() => {
-          const link = document.createElement('a')
-          const baseUrl = image.url.split('?')[0]
-          link.href = baseUrl + '?thumbnail=false'
-          link.download = `rednote_page_${image.index + 1}.png`
-          link.click()
-        }, index * 300)
-      }
-    })
+    } else {
+      store.images.forEach((image, index) => {
+        if (image.url) {
+          setTimeout(() => {
+            const originalUrl = getOriginalImageUrlFromDisplayUrl(image.url)
+            if (!originalUrl) return
+            const link = document.createElement('a')
+            link.href = originalUrl
+            link.download = `rednote_page_${image.index + 1}.png`
+            link.click()
+          }, index * 300)
+        }
+      })
+    }
+  } catch (e: any) {
+    alert('下载失败: ' + (e?.message || String(e)))
+  }
+}
+
+function generatedFilenamesWithReplacement(index: number, imageUrl: string): Array<string | null> {
+  const generated: Array<string | null> = new Array(store.images.length).fill(null)
+  store.images.forEach((img) => {
+    if (!img.url) return
+    const base = img.url.split('?')[0]
+    const filename = base.split('/').pop() || null
+    generated[img.index] = filename
+  })
+  const nextFilename = imageUrl.split('?')[0].split('/').pop() || null
+  if (index >= 0 && index < generated.length) {
+    generated[index] = nextFilename
+  }
+  return generated
+}
+
+async function saveRegeneratedImage(index: number, imageUrl: string) {
+  if (!store.recordId) {
+    return true
+  }
+
+  const result = await updateHistory(store.recordId, {
+    images: {
+      task_id: store.taskId,
+      generated: generatedFilenamesWithReplacement(index, imageUrl)
+    }
+  })
+
+  if (!result.success) {
+    alert('图片已重新生成，但保存到历史记录失败: ' + (result.error || '未知错误'))
+    return false
+  }
+
+  return true
+}
+
+async function applyRegeneratedImage(index: number, imageUrl: string) {
+  if (await saveRegeneratedImage(index, imageUrl)) {
+    store.updateImage(index, imageUrl)
   }
 }
 
@@ -257,34 +304,18 @@ const handleRegenerate = async (image: any) => {
     // 构建上下文信息
     const context = {
       fullOutline: store.outline.raw || '',
-      userTopic: store.topic || ''
+      userTopic: store.topic || '',
+      styleHint: store.styleHint || ''
     }
 
     const result = await regenerateImage(store.taskId, pageContent, true, context)
     if (result.success && result.image_url) {
-       const newUrl = result.image_url
-       store.updateImage(image.index, newUrl)
-
-       if (store.recordId) {
-         const generated: Array<string | null> = new Array(store.images.length).fill(null)
-         store.images.forEach((img) => {
-           if (!img.url) return
-           const base = img.url.split('?')[0]
-           const filename = base.split('/').pop() || null
-           generated[img.index] = filename
-         })
-         await updateHistory(store.recordId, {
-           images: {
-             task_id: store.taskId,
-             generated
-           }
-         })
-       }
+       await applyRegeneratedImage(image.index, result.image_url)
     } else {
        alert('重绘失败: ' + (result.error || '未知错误'))
     }
   } catch (e: any) {
-    alert('重绘失败: ' + e.message)
+    alert('重绘失败: ' + (e?.message || String(e)))
   } finally {
     regeneratingIndex.value = null
   }

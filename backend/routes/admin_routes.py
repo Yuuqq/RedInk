@@ -21,13 +21,25 @@ from pathlib import Path
 from typing import Dict, Any
 
 import yaml
-import requests
 from flask import Blueprint, jsonify, request, send_file
 
-from backend.services.image import get_image_service
+from backend.config import Config
+from backend.services.image import get_existing_image_service
 from backend.utils.url import normalize_openai_base_url
+from backend.utils.remote_image import allow_private_provider_urls, safe_http_request, validate_public_http_url
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int, *, min_value: int | None = None) -> int:
+    raw = os.environ.get(name)
+    try:
+        value = int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        return default
+    if min_value is not None and value < min_value:
+        return default
+    return value
 
 
 def _is_local_request() -> bool:
@@ -44,8 +56,9 @@ def _is_local_request() -> bool:
     if trust_xff:
         xff = request.headers.get("X-Forwarded-For")
         if xff:
-            # Prefer the last hop IP (closest proxy) when trusting XFF.
-            remote_addr = xff.split(",")[-1].strip() or remote_addr
+            # Prefer the original client IP. Only enable this when the reverse
+            # proxy overwrites client-supplied XFF headers.
+            remote_addr = xff.split(",")[0].strip() or remote_addr
     try:
         ip = ipaddress.ip_address(remote_addr)
         if ip.is_loopback:
@@ -74,11 +87,12 @@ def _require_local():
 def _require_admin_token_if_remote_enabled():
     """
     防止误开放管理接口：
-    - 当允许非本机访问（REDINK_ADMIN_ALLOW_REMOTE / REDINK_ADMIN_TRUST_PRIVATE）时，强制要求配置 REDINK_AUTH_TOKEN
+    - 当允许非本机访问（REDINK_ADMIN_ALLOW_REMOTE / REDINK_ADMIN_TRUST_PRIVATE / REDINK_ADMIN_TRUST_XFF）时，强制要求配置 REDINK_AUTH_TOKEN
     """
     allow_remote = os.environ.get("REDINK_ADMIN_ALLOW_REMOTE", "").strip().lower() in ("1", "true", "yes")
     trust_private = os.environ.get("REDINK_ADMIN_TRUST_PRIVATE", "").strip().lower() in ("1", "true", "yes")
-    if not (allow_remote or trust_private):
+    trust_xff = os.environ.get("REDINK_ADMIN_TRUST_XFF", "").strip().lower() in ("1", "true", "yes")
+    if not (allow_remote or trust_private or trust_xff):
         return None
 
     if (os.environ.get("REDINK_AUTH_TOKEN") or "").strip():
@@ -173,11 +187,7 @@ def _history_stats() -> Dict[str, Any]:
         except Exception:
             records = []
 
-    referenced_task_ids = set()
-    for r in records:
-        tid = (r or {}).get("task_id")
-        if tid:
-            referenced_task_ids.add(str(tid))
+    referenced_task_ids = _referenced_task_ids(history_root)
 
     task_dirs = []
     total_bytes = 0
@@ -208,6 +218,42 @@ def _history_stats() -> Dict[str, Any]:
         "largest_task_dirs": task_dirs[:20],
         "newest_task_dirs": newest_dirs[:20],
     }
+
+
+def _referenced_task_ids(history_root: Path) -> set[str]:
+    index_path = history_root / "index.json"
+    records = []
+    if index_path.exists():
+        try:
+            import json
+            records = (json.loads(index_path.read_text(encoding="utf-8")) or {}).get("records", [])
+        except Exception:
+            records = []
+
+    referenced = set()
+    for r in records:
+        tid = (r or {}).get("task_id")
+        if tid and _safe_task_id(str(tid)):
+            referenced.add(str(tid))
+
+        rid = (r or {}).get("id")
+        if not rid or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(rid)):
+            continue
+
+        try:
+            detail_path = (history_root / f"{rid}.json").resolve()
+            detail_path.relative_to(history_root.resolve())
+            if detail_path.is_symlink() or not detail_path.exists():
+                continue
+            import json
+            detail = json.loads(detail_path.read_text(encoding="utf-8")) or {}
+            detail_tid = (detail.get("images") or {}).get("task_id")
+            if detail_tid and _safe_task_id(str(detail_tid)):
+                referenced.add(str(detail_tid))
+        except Exception:
+            continue
+
+    return referenced
 
 
 def _safe_task_id(task_id: str) -> bool:
@@ -245,10 +291,27 @@ def _probe_openai_compatible_models(base_url: str, api_key: str) -> Dict[str, An
     if not base:
         return {"ok": False, "error": "base_url 为空"}
 
-    url = f"{base}/v1/models"
+    try:
+        safe_base = validate_public_http_url(
+            base,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+        )
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+    url = f"{safe_base}/v1/models"
 
     try:
-        r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=10)
+        r = safe_http_request(
+            "GET",
+            url,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+            allow_redirects=False,
+        )
         ok = r.status_code == 200
         detail = None
         if not ok:
@@ -275,9 +338,8 @@ def create_admin_blueprint():
 
     @admin_bp.route("/admin/health", methods=["GET"])
     def admin_health():
-        root = _get_project_root()
-        text_cfg = _read_yaml(root / "text_providers.yaml")
-        image_cfg = _read_yaml(root / "image_providers.yaml")
+        text_cfg = _read_yaml(Config.get_text_providers_path())
+        image_cfg = _read_yaml(Config.get_image_providers_path())
 
         active_text_name = text_cfg.get("active_provider")
         active_image_name = image_cfg.get("active_provider")
@@ -329,24 +391,40 @@ def create_admin_blueprint():
 
     @admin_bp.route("/admin/tasks", methods=["GET"])
     def list_tasks():
-        svc = get_image_service()
-        tasks = svc.list_tasks()
+        svc = get_existing_image_service()
+        tasks = svc.list_tasks() if svc is not None else []
         return jsonify({"success": True, "tasks": tasks})
 
     @admin_bp.route("/admin/tasks/<task_id>", methods=["DELETE"])
     def cleanup_task(task_id: str):
         delete_files = request.args.get("delete_files", "false").lower() == "true"
+        confirm_delete_referenced = request.args.get("confirm_delete_referenced")
 
-        svc = get_image_service()
-        existed = svc.get_task_state(task_id) is not None
-        svc.cleanup_task(task_id)
+        svc = get_existing_image_service()
+        existed = svc.get_task_state(task_id) is not None if svc is not None else False
 
         deleted = False
         error = None
+        referenced = False
         if delete_files:
             history_root = _get_project_root() / "history"
             history_root.mkdir(parents=True, exist_ok=True)
             task_dir = _safe_task_dir(history_root, task_id)
+            referenced = str(task_id) in _referenced_task_ids(history_root)
+            if referenced and confirm_delete_referenced != "YES_DELETE_REFERENCED_TASK":
+                return jsonify({
+                    "success": False,
+                    "task_id": task_id,
+                    "existed_in_memory": existed,
+                    "deleted_files": False,
+                    "referenced": True,
+                    "error": "任务目录仍被历史记录引用，拒绝删除文件；如确需删除，请传入 confirm_delete_referenced=YES_DELETE_REFERENCED_TASK",
+                }), 409
+
+        if svc is not None:
+            svc.cleanup_task(task_id)
+
+        if delete_files:
             try:
                 if task_dir and task_dir.exists() and task_dir.is_dir():
                     shutil.rmtree(task_dir)
@@ -359,6 +437,7 @@ def create_admin_blueprint():
             "task_id": task_id,
             "existed_in_memory": existed,
             "deleted_files": deleted,
+            "referenced": referenced,
             "error": error,
         })
 
@@ -382,7 +461,7 @@ def create_admin_blueprint():
 
         log_file = _get_log_file()
         chunk = _read_log_chunk(log_file, offset, max_bytes)
-        warn_bytes = int(os.environ.get("REDINK_LOG_WARN_BYTES", str(100 * 1024 * 1024)))  # 100MB
+        warn_bytes = _env_int("REDINK_LOG_WARN_BYTES", 100 * 1024 * 1024, min_value=0)
         warnings = []
         size = chunk.get("size") or 0
         if warn_bytes > 0 and size > warn_bytes:
@@ -484,8 +563,16 @@ def create_admin_blueprint():
         - scope: orphan|all (default orphan)
         - dry_run: bool (default true)
         """
-        data = request.get_json(silent=True) or {}
-        scope = (data.get("scope") or "orphan").strip().lower()  # orphan|all
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "请求体必须是 JSON object"}), 400
+
+        raw_scope = data.get("scope") or "orphan"
+        if not isinstance(raw_scope, str):
+            return jsonify({"success": False, "error": "scope 只能为 orphan 或 all"}), 400
+        scope = raw_scope.strip().lower()  # orphan|all
         delete_orphan_tasks = bool(data.get("delete_orphan_tasks", False))
         dry_run = bool(data.get("dry_run", True))
         older_than_days = data.get("older_than_days", None)
@@ -554,18 +641,7 @@ def create_admin_blueprint():
 
         # Build metadata map from stats.largest/newest isn't enough; rescan quick for scope decisions.
         task_meta = {}
-        referenced_task_ids = set()
-        try:
-            import json
-            idx = history_root / "index.json"
-            if idx.exists():
-                records = (json.loads(idx.read_text(encoding="utf-8")) or {}).get("records", [])
-                for r in records:
-                    tid = (r or {}).get("task_id")
-                    if tid:
-                        referenced_task_ids.add(str(tid))
-        except Exception:
-            referenced_task_ids = set()
+        referenced_task_ids = _referenced_task_ids(history_root)
 
         for p in history_root.iterdir():
             if not p.is_dir():

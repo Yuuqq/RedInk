@@ -6,8 +6,41 @@ API 路由工具函数
 
 import logging
 import traceback
+from collections.abc import Mapping, Sequence
 
 logger = logging.getLogger(__name__)
+
+SENSITIVE_KEY_PARTS = (
+    "api_key",
+    "apikey",
+    "authorization",
+    "auth_token",
+    "bearer",
+    "password",
+    "secret",
+    "token",
+)
+
+
+def _safe_log_value(key: str, value):
+    key_lower = str(key).lower()
+    if any(part in key_lower for part in SENSITIVE_KEY_PARTS):
+        return "[REDACTED]"
+    if isinstance(value, bytes):
+        return f"[{len(value)} bytes]"
+    if isinstance(value, str):
+        return value if len(value) <= 200 else f"{value[:200]}..."
+    if isinstance(value, Mapping):
+        return {
+            str(child_key): _safe_log_value(str(child_key), child_value)
+            for child_key, child_value in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [
+            _safe_log_value(key, item)
+            for item in list(value)[:20]
+        ]
+    return value
 
 
 def log_request(endpoint: str, data: dict = None):
@@ -22,10 +55,11 @@ def log_request(endpoint: str, data: dict = None):
 
     if data:
         # 过滤敏感信息和大数据（图片二进制）
-        safe_data = {
-            k: v for k, v in data.items()
-            if k not in ['images', 'user_images'] and not isinstance(v, bytes)
-        }
+        safe_data = {}
+        for k, v in data.items():
+            if k in ['images', 'user_images']:
+                continue
+            safe_data[k] = _safe_log_value(str(k), v)
 
         # 对图片数据只显示数量
         if 'images' in data:

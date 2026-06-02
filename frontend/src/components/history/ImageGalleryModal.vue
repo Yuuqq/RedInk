@@ -66,7 +66,7 @@
             :class="{ 'regenerating': regeneratingImages.has(idx) }"
           >
             <img
-              :src="`/api/images/${record.images.task_id}/${img}`"
+              :src="imageUrl(img)"
               loading="lazy"
               decoding="async"
             />
@@ -104,6 +104,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import { getImageUrl } from '../../api'
 
 /**
  * 图片画廊模态框组件
@@ -135,6 +136,7 @@ const props = defineProps<{
   visible: boolean
   record: ViewingRecord | null
   regeneratingImages: Set<number>
+  refreshToken: number
 }>()
 
 // 定义 Emits
@@ -155,6 +157,12 @@ const formattedDate = computed(() => {
   const d = new Date(props.record.updated_at)
   return `${d.getMonth() + 1}/${d.getDate()}`
 })
+
+function imageUrl(filename: string) {
+  if (!props.record) return ''
+  const url = getImageUrl(props.record.images.task_id, filename, true)
+  return props.refreshToken ? `${url}&t=${props.refreshToken}` : url
+}
 </script>
 
 <style scoped>

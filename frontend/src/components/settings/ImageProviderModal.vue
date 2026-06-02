@@ -205,12 +205,12 @@ function updateField(field: keyof FormData, value: string | boolean) {
 
 // 是否显示 Base URL
 const showBaseUrl = computed(() => {
-  return ['image_api', 'google_genai'].includes(props.formData.type)
+  return ['image_api', 'openai_compatible', 'google_genai'].includes(props.formData.type)
 })
 
 // 是否显示端点类型
 const showEndpointType = computed(() => {
-  return props.formData.type === 'image_api'
+  return ['image_api', 'openai_compatible'].includes(props.formData.type)
 })
 
 // 模型占位符
@@ -219,6 +219,7 @@ const modelPlaceholder = computed(() => {
     case 'google_genai':
       return '例如: imagen-3.0-generate-002'
     case 'image_api':
+    case 'openai_compatible':
       return '例如: flux-pro'
     default:
       return '例如: gpt-4o'
@@ -232,7 +233,8 @@ const previewUrl = computed(() => {
   const baseUrl = props.formData.base_url.replace(/\/$/, '').replace(/\/v1$/, '')
 
   switch (props.formData.type) {
-    case 'image_api': {
+    case 'image_api':
+    case 'openai_compatible': {
       // 使用用户自定义的端点路径
       let endpoint = props.formData.endpoint_type || '/v1/images/generations'
       if (!endpoint.startsWith('/')) {

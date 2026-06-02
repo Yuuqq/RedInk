@@ -1,9 +1,14 @@
 """OpenAI 兼容接口图片生成器"""
 import logging
-import base64
 from typing import Dict, Any
-import requests
 from .base import ImageGeneratorBase
+from backend.utils.remote_image import (
+    allow_private_provider_urls,
+    safe_decode_base64_image,
+    safe_download_image,
+    safe_http_request,
+    validate_public_http_url,
+)
 from backend.utils.url import normalize_openai_base_url
 
 logger = logging.getLogger(__name__)
@@ -31,6 +36,12 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
                 "OpenAI 兼容 API Base URL 未配置。\n"
                 "解决方案：在系统设置页面编辑该服务商，填写 Base URL"
             )
+
+        self.base_url = validate_public_http_url(
+            self.base_url,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+        )
 
         # 默认模型
         self.default_model = config.get('model', 'dall-e-3')
@@ -113,7 +124,16 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
         if quality and model.startswith('dall-e'):
             payload["quality"] = quality
 
-        response = requests.post(url, headers=headers, json=payload, timeout=300)
+        response = safe_http_request(
+            "POST",
+            url,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+            headers=headers,
+            json=payload,
+            timeout=300,
+            allow_redirects=False,
+        )
 
         if response.status_code != 200:
             error_detail = response.text[:500]
@@ -151,20 +171,19 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
 
         # 处理base64格式
         if "b64_json" in image_data:
-            img_bytes = base64.b64decode(image_data["b64_json"])
+            img_bytes = safe_decode_base64_image(image_data["b64_json"])
             logger.info(f"✅ OpenAI Images API 图片生成成功: {len(img_bytes)} bytes")
             return img_bytes
 
         # 处理URL格式
         elif "url" in image_data:
             logger.debug(f"  下载图片 URL...")
-            img_response = requests.get(image_data["url"], timeout=60)
-            if img_response.status_code == 200:
-                logger.info(f"✅ OpenAI Images API 图片生成成功: {len(img_response.content)} bytes")
-                return img_response.content
-            else:
-                logger.error(f"下载图片失败: {img_response.status_code}")
-                raise Exception(f"下载图片失败: {img_response.status_code}")
+            img_bytes = safe_download_image(
+                image_data["url"],
+                allow_private=allow_private_provider_urls(),
+            )
+            logger.info(f"✅ OpenAI Images API 图片生成成功: {len(img_bytes)} bytes")
+            return img_bytes
 
         else:
             logger.error(f"无法从响应中提取图片数据: {str(image_data)[:200]}")
@@ -213,7 +232,16 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
             "temperature": 1.0
         }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=300)
+        response = safe_http_request(
+            "POST",
+            url,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+            headers=headers,
+            json=payload,
+            timeout=300,
+            allow_redirects=False,
+        )
 
         if response.status_code != 200:
             error_detail = response.text[:500]
@@ -267,8 +295,7 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
                     if isinstance(image_url, str) and image_url:
                         if image_url.startswith("data:image"):
                             logger.info("检测到 message.images Base64 图片数据")
-                            base64_data = image_url.split(",", 1)[1]
-                            return base64.b64decode(base64_data)
+                            return safe_decode_base64_image(image_url)
                         if image_url.startswith("http://") or image_url.startswith("https://"):
                             logger.info("检测到 message.images 图片 URL")
                             return self._download_image(image_url.strip())
@@ -286,8 +313,7 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
                     # 2. 尝试解析 Base64 data URL
                     if content.startswith("data:image"):
                         logger.info("检测到 Base64 图片数据")
-                        base64_data = content.split(",")[1]
-                        return base64.b64decode(base64_data)
+                        return safe_decode_base64_image(content)
 
                     # 3. 尝试作为纯 URL 处理
                     if content.startswith("http://") or content.startswith("https://"):
@@ -323,14 +349,9 @@ class OpenAICompatibleGenerator(ImageGeneratorBase):
         """下载图片并返回二进制数据"""
         logger.info(f"下载图片: {url[:100]}...")
         try:
-            response = requests.get(url, timeout=60)
-            if response.status_code == 200:
-                logger.info(f"✅ 图片下载成功: {len(response.content)} bytes")
-                return response.content
-            else:
-                raise Exception(f"下载图片失败: HTTP {response.status_code}")
-        except requests.exceptions.Timeout:
-            raise Exception("❌ 下载图片超时，请重试")
+            image_data = safe_download_image(url, allow_private=allow_private_provider_urls())
+            logger.info(f"✅ 图片下载成功: {len(image_data)} bytes")
+            return image_data
         except Exception as e:
             raise Exception(f"❌ 下载图片失败: {str(e)}")
 

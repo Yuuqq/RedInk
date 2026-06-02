@@ -13,12 +13,16 @@ import os
 import io
 import zipfile
 import logging
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from flask import Blueprint, request, jsonify, send_file
+from backend.config import Config
 from backend.services.history import get_history_service
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_HISTORY_STATUSES = {"draft", "generating", "partial", "completed", "error"}
 
 
 def create_history_blueprint():
@@ -74,6 +78,16 @@ def create_history_blueprint():
                     "error": "参数错误：topic 和 outline 不能为空。\n请提供主题和大纲内容。"
                 }), 400
 
+            if not isinstance(topic, str):
+                return jsonify({"success": False, "error": "参数错误：topic 必须是字符串"}), 400
+            if not isinstance(outline, dict):
+                return jsonify({"success": False, "error": "参数错误：outline 必须是 JSON object"}), 400
+            outline_error = _validate_outline_payload(outline)
+            if outline_error:
+                return jsonify({"success": False, "error": outline_error}), 400
+            if task_id is not None and not isinstance(task_id, str):
+                return jsonify({"success": False, "error": "参数错误：task_id 必须是字符串"}), 400
+
             history_service = get_history_service()
             record_id = history_service.create_record(topic, outline, task_id)
 
@@ -106,9 +120,20 @@ def create_history_blueprint():
         - total_pages: 总页数
         """
         try:
-            page = int(request.args.get('page', 1))
-            page_size = int(request.args.get('page_size', 20))
+            try:
+                page = int(request.args.get('page', 1))
+                page_size = int(request.args.get('page_size', 20))
+            except Exception:
+                return jsonify({"success": False, "error": "参数错误：page 和 page_size 必须是整数"}), 400
+            if page < 1:
+                return jsonify({"success": False, "error": "参数错误：page 必须大于等于 1"}), 400
+            if page_size < 1 or page_size > 100:
+                return jsonify({"success": False, "error": "参数错误：page_size 必须在 1 到 100 之间"}), 400
             status = request.args.get('status')
+            if status and status not in {"all", *ALLOWED_HISTORY_STATUSES}:
+                return jsonify({"success": False, "error": "参数错误：status 不合法"}), 400
+            if status == "all":
+                status = None
 
             history_service = get_history_service()
             result = history_service.list_records(page, page_size, status)
@@ -239,6 +264,16 @@ def create_history_blueprint():
             content = data.get('content')
             status = data.get('status')
             thumbnail = data.get('thumbnail')
+
+            validation_error = _validate_history_update_payload(
+                outline=outline,
+                images=images,
+                content=content,
+                status=status,
+                thumbnail=thumbnail
+            )
+            if validation_error:
+                return jsonify({"success": False, "error": validation_error}), 400
 
             history_service = get_history_service()
             success = history_service.update_record(
@@ -463,6 +498,16 @@ def create_history_blueprint():
                     "error": f"任务目录不存在或路径不安全：{task_id}"
                 }), 404
 
+            source_bytes = _safe_image_source_bytes(task_dir)
+            if source_bytes > Config.MAX_HISTORY_ZIP_SOURCE_BYTES:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        "历史图片总大小超过下载限制。"
+                        f"当前 {source_bytes} bytes，限制 {Config.MAX_HISTORY_ZIP_SOURCE_BYTES} bytes。"
+                    )
+                }), 413
+
             # 创建内存中的 ZIP 文件
             zip_buffer = _create_images_zip(task_dir, record)
 
@@ -486,6 +531,104 @@ def create_history_blueprint():
             }), 500
 
     return history_bp
+
+
+def _is_safe_task_id(task_id: str) -> bool:
+    return re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", task_id or "") is not None
+
+
+def _is_safe_image_filename(filename: str) -> bool:
+    return re.fullmatch(r"(thumb_)?\d+\.(png|jpg|jpeg)", filename or "", flags=re.IGNORECASE) is not None
+
+
+def _validate_generated_list(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    for item in value:
+        if item is None:
+            continue
+        if not isinstance(item, str) or not _is_safe_image_filename(item):
+            return False
+    return True
+
+
+def _validate_history_update_payload(
+    *,
+    outline: Any,
+    images: Any,
+    content: Any,
+    status: Any,
+    thumbnail: Any
+) -> Optional[str]:
+    if outline is not None and not isinstance(outline, dict):
+        return "参数错误：outline 必须是 JSON object"
+    if outline is not None:
+        outline_error = _validate_outline_payload(outline)
+        if outline_error:
+            return outline_error
+
+    if images is not None:
+        if not isinstance(images, dict):
+            return "参数错误：images 必须是 JSON object"
+        task_id = images.get("task_id")
+        if task_id is not None:
+            if not isinstance(task_id, str) or not _is_safe_task_id(task_id):
+                return "参数错误：images.task_id 不安全"
+        if "generated" in images and not _validate_generated_list(images.get("generated")):
+            return "参数错误：images.generated 必须是安全文件名数组"
+
+    if content is not None:
+        if not isinstance(content, dict):
+            return "参数错误：content 必须是 JSON object"
+        titles = content.get("titles", [])
+        tags = content.get("tags", [])
+        copywriting = content.get("copywriting", "")
+        if not isinstance(titles, list) or not all(isinstance(x, str) for x in titles):
+            return "参数错误：content.titles 必须是字符串数组"
+        if not isinstance(tags, list) or not all(isinstance(x, str) for x in tags):
+            return "参数错误：content.tags 必须是字符串数组"
+        if not isinstance(copywriting, str):
+            return "参数错误：content.copywriting 必须是字符串"
+
+    if status is not None:
+        if not isinstance(status, str) or status not in ALLOWED_HISTORY_STATUSES:
+            return "参数错误：status 不合法"
+
+    if thumbnail is not None:
+        if not isinstance(thumbnail, str) or not _is_safe_image_filename(thumbnail):
+            return "参数错误：thumbnail 必须是安全图片文件名"
+
+    return None
+
+
+def _validate_outline_payload(outline: Any) -> Optional[str]:
+    if not isinstance(outline, dict):
+        return "参数错误：outline 必须是 JSON object"
+
+    pages = outline.get("pages")
+    if not isinstance(pages, list) or not pages:
+        return "参数错误：outline.pages 不能为空且必须是数组"
+
+    seen_indices = set()
+    for page in pages:
+        if not isinstance(page, dict):
+            return "参数错误：outline.pages 中的每一项都必须是 JSON object"
+        index = page.get("index")
+        if not isinstance(index, int) or index < 0:
+            return "参数错误：outline.pages 中的 index 必须是非负整数"
+        if "content" not in page or not isinstance(page.get("content"), str):
+            return "参数错误：outline.pages 中的 content 必须是字符串"
+        page_type = page.get("type")
+        if page_type is not None and (not isinstance(page_type, str) or not page_type):
+            return "参数错误：outline.pages 中的 type 必须是字符串"
+        if index in seen_indices:
+            return "参数错误：outline.pages 中的 index 不能重复"
+        seen_indices.add(index)
+
+    if seen_indices != set(range(len(pages))):
+        return "参数错误：outline.pages 中的 index 必须从 0 开始连续"
+
+    return None
 
 
 def _create_images_zip(task_dir: str, record: Optional[dict] = None) -> io.BytesIO:
@@ -597,6 +740,30 @@ def _create_images_zip(task_dir: str, record: Optional[dict] = None) -> io.Bytes
     return memory_file
 
 
+def _safe_image_source_bytes(task_dir: str) -> int:
+    task_path = Path(task_dir).resolve()
+    if Path(task_dir).is_symlink():
+        raise ValueError("任务目录为符号链接，已拒绝统计")
+
+    total = 0
+    for filename in os.listdir(task_dir):
+        if filename.startswith('thumb_') or not filename.endswith(('.png', '.jpg', '.jpeg')):
+            continue
+
+        file_path = task_path / filename
+        try:
+            if file_path.is_symlink():
+                continue
+            file_path.resolve().relative_to(task_path)
+        except Exception:
+            continue
+
+        if file_path.exists() and file_path.is_file():
+            total += file_path.stat().st_size
+
+    return total
+
+
 def _sanitize_filename(title: str) -> str:
     """
     清理文件名中的非法字符
@@ -613,7 +780,21 @@ def _sanitize_filename(title: str) -> str:
         if c.isalnum() or c in (' ', '-', '_') or ('\u4e00' <= c <= '\u9fff')
     ).strip()
 
-    return safe_title if safe_title else 'images'
+    if not safe_title:
+        return 'images'
+    return _truncate_utf8_filename_stem(safe_title, max_bytes=80) or 'images'
+
+
+def _truncate_utf8_filename_stem(value: str, *, max_bytes: int) -> str:
+    result = []
+    used = 0
+    for char in value:
+        char_bytes = len(char.encode("utf-8"))
+        if used + char_bytes > max_bytes:
+            break
+        result.append(char)
+        used += char_bytes
+    return "".join(result).rstrip()
 
 
 def _safe_task_dir(history_root: str, task_id: str) -> Optional[str]:

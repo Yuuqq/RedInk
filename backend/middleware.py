@@ -18,7 +18,8 @@ def require_auth(f):
     Authentication decorator.
 
     When REDINK_AUTH_TOKEN is set, requires Bearer token in Authorization header.
-    When REDINK_AUTH_TOKEN is not set, authentication is disabled (open access).
+    Without REDINK_AUTH_TOKEN, app-level startup/request guards reject access
+    unless REDINK_ALLOW_UNAUTH_REMOTE=1 explicitly opts into unauthenticated mode.
     """
     @wraps(f)
     def decorated(*args, **kwargs):

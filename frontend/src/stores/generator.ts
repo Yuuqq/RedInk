@@ -345,7 +345,8 @@ export const useGeneratorStore = defineStore('generator', {
       if (image) {
         // 添加时间戳避免缓存
         const timestamp = Date.now()
-        image.url = `${newUrl}?t=${timestamp}`
+        const sep = newUrl.includes('?') ? '&' : '?'
+        image.url = `${newUrl}${sep}t=${timestamp}`
         image.status = 'done'
         delete image.error
       }

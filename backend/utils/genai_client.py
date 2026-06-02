@@ -8,6 +8,7 @@ from google.genai import types
 
 # 导入统一的错误解析函数
 from ..generators.google_genai import parse_genai_error
+from .remote_image import allow_private_provider_urls, allow_unpinned_provider_urls, validate_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,19 @@ class GenAIClient:
 
         # 如果有 base_url，使用 http_options
         if base_url:
+            if not allow_unpinned_provider_urls():
+                raise ValueError(
+                    "Google GenAI 自定义 Base URL 默认禁用。\n"
+                    "原因：Google SDK 管理底层 HTTP 连接，无法在本应用内固定已验证 IP，存在 DNS rebinding SSRF 风险。\n"
+                    "解决方案：留空 base_url 使用官方 Gemini API，或在可信内网部署时设置 REDINK_ALLOW_UNPINNED_PROVIDER_URLS=1。"
+                )
+            safe_base_url = validate_public_http_url(
+                base_url,
+                label="服务商 Base URL",
+                allow_private=allow_private_provider_urls(),
+            )
             client_kwargs["http_options"] = {
-                "base_url": base_url,
+                "base_url": safe_base_url,
                 "api_version": "v1beta"
             }
 

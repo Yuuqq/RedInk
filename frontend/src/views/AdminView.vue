@@ -22,7 +22,7 @@
           </label>
           <label class="field">
             <span class="label">API Key</span>
-            <input v-model="quick.apiKey" class="input" placeholder="whoisyourai" />
+            <input v-model="quick.apiKey" class="input" placeholder="请输入 API Key" />
           </label>
           <label class="field">
             <span class="label">文本模型</span>
@@ -175,7 +175,7 @@
           <p class="section-desc">读取后端 `logs/redink.log`（支持增量拉取与下载）</p>
         </div>
         <div class="actions-inline">
-          <a class="btn btn-ghost" :href="getAdminLogsDownloadUrl()" target="_blank" rel="noopener noreferrer">下载</a>
+          <button class="btn btn-ghost" :disabled="logs.loading" @click="downloadLogs">下载</button>
           <button class="btn btn-ghost" :disabled="logs.loading" @click="rotateLogs">轮转</button>
           <button class="btn btn-ghost" :disabled="logs.loading" @click="loadLogs(true)">重置</button>
           <button class="btn btn-ghost" :disabled="logs.loading" @click="loadLogs(false)">刷新</button>
@@ -277,9 +277,9 @@ import http from '../api/http'
 import { RouterLink } from 'vue-router'
 import {
   cleanupAdminTask,
+  downloadAdminLogs,
   getAdminHealth,
   getAdminLogs,
-  getAdminLogsDownloadUrl,
   rotateAdminLogs,
   getAdminHistoryStats,
   cleanupAdminHistory,
@@ -309,7 +309,7 @@ const cleaningTask = ref<string | null>(null)
 
 const quick = reactive({
   baseUrl: 'http://127.0.0.1:8317/v1',
-  apiKey: 'whoisyourai',
+  apiKey: '',
   textModel: 'gemini-3-pro-preview',
   imageModel: 'gemini-3-pro-image-preview',
 })
@@ -446,6 +446,29 @@ async function rotateLogs() {
   }
 }
 
+async function downloadLogs() {
+  logs.loading = true
+  logs.error = ''
+  try {
+    const r = await downloadAdminLogs()
+    if (!r.success || !r.blob) {
+      logs.error = r.error || '下载日志失败'
+      return
+    }
+
+    const url = URL.createObjectURL(r.blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = r.filename || 'redink.log'
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  } catch (e: any) {
+    logs.error = e?.response?.data?.error || e?.message || String(e)
+  } finally {
+    logs.loading = false
+  }
+}
+
 async function loadHistoryStats() {
   history.loading = true
   history.message = ''
@@ -544,6 +567,8 @@ function stopAutoRefresh() {
 }
 
 async function applyQuickSetup() {
+  if (!validateQuickSetup()) return
+
   savingQuick.value = true
   quickMessage.value = ''
   try {
@@ -594,23 +619,29 @@ async function applyQuickSetup() {
 }
 
 async function testQuickSetup() {
+  if (!validateQuickSetup()) return
+
   testingQuick.value = true
   quickMessage.value = ''
   try {
     // Text probe
     const t = await testConnection({
       type: 'openai_compatible',
+      provider_category: 'text',
       api_key: quick.apiKey,
       base_url: quick.baseUrl,
       model: quick.textModel,
+      endpoint_type: '/v1/chat/completions',
     })
 
     // Image probe: for cliproxy the chat endpoint still works, use type=image_api
     const i = await testConnection({
       type: 'image_api',
+      provider_category: 'image',
       api_key: quick.apiKey,
       base_url: quick.baseUrl,
       model: quick.imageModel,
+      endpoint_type: '/v1/chat/completions',
     })
 
     if (t.success && i.success) {
@@ -628,6 +659,22 @@ async function testQuickSetup() {
   }
 }
 
+function validateQuickSetup() {
+  const missing: string[] = []
+  if (!quick.baseUrl.trim()) missing.push('API Base URL')
+  if (!quick.apiKey.trim()) missing.push('API Key')
+  if (!quick.textModel.trim()) missing.push('文本模型')
+  if (!quick.imageModel.trim()) missing.push('图片模型')
+
+  if (missing.length > 0) {
+    quickMessageType.value = 'error'
+    quickMessage.value = '请填写：' + missing.join('、')
+    return false
+  }
+
+  return true
+}
+
 async function cleanupTask(taskId: string, deleteFiles: boolean) {
   cleaningTask.value = taskId
   taskMessage.value = ''
@@ -640,7 +687,16 @@ async function cleanupTask(taskId: string, deleteFiles: boolean) {
       }
     }
 
-    const r = await cleanupAdminTask(taskId, deleteFiles)
+    let r = await cleanupAdminTask(taskId, deleteFiles)
+    if (!r.success && deleteFiles && r.referenced) {
+      const ok = confirm(
+        `history/${taskId} 仍被历史记录引用。继续会删除图片文件，但历史记录将无法再显示这些图片。\n\n确定强制删除吗？`
+      )
+      if (ok) {
+        r = await cleanupAdminTask(taskId, true, true)
+      }
+    }
+
     if (r.success) {
       taskMessageType.value = 'info'
       taskMessage.value = deleteFiles

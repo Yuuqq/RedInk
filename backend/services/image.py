@@ -15,6 +15,24 @@ from backend.utils.image_compressor import compress_image
 logger = logging.getLogger(__name__)
 
 
+def _env_int(name: str, default: int, *, min_value: int | None = None) -> int:
+    raw = os.environ.get(name)
+    try:
+        value = int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        logger.warning(f"环境变量 {name} 不是有效整数，使用默认值: {default}")
+        return default
+    if min_value is not None and value < min_value:
+        logger.warning(f"环境变量 {name} 小于最小值 {min_value}，使用默认值: {default}")
+        return default
+    return value
+
+
+def new_task_id() -> str:
+    """Generate an unguessable task id for unauthenticated image URLs."""
+    return f"task_{uuid.uuid4().hex}"
+
+
 class ImageService:
     """图片生成服务类"""
 
@@ -25,7 +43,7 @@ class ImageService:
     AUTO_RETRY_COUNT = 1  # 不自动重试，超时后让用户手动重试
 
     # 任务状态保留时间（秒），防止 _task_states 无限增长
-    TASK_STATE_TTL_SECONDS = int(os.environ.get("REDINK_TASK_STATE_TTL_SECONDS", str(6 * 60 * 60)))  # 6h
+    TASK_STATE_TTL_SECONDS = _env_int("REDINK_TASK_STATE_TTL_SECONDS", 6 * 60 * 60, min_value=0)
 
     def __init__(self, provider_name: str = None):
         """
@@ -321,7 +339,7 @@ class ImageService:
         self._cleanup_expired_task_states()
 
         if not task_id:
-            task_id = f"task_{uuid.uuid4().hex[:8]}"
+            task_id = new_task_id()
         else:
             task_id = str(task_id)
             if not self._is_safe_task_id(task_id):
@@ -1097,6 +1115,10 @@ def get_image_service() -> ImageService:
         with _service_lock:
             if _service_instance is None:
                 _service_instance = ImageService()
+    return _service_instance
+
+def get_existing_image_service() -> Optional[ImageService]:
+    """Return the current image service without constructing/config-validating it."""
     return _service_instance
 
 def reset_image_service():

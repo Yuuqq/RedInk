@@ -4,16 +4,30 @@ services:
     image: csslab:local
     container_name: csslab
     ports:
-      - "12398:12398"
+      - "${REDINK_PORT:-12398}:${REDINK_PORT:-12398}"
     volumes:
-      # 持久化数据目录
+      # 持久化历史记录与生成图片
       - ./history:/app/history
-      - ./output:/app/output
-      # 可选：挂载自定义配置文件
-      # - ./text_providers.yaml:/app/text_providers.yaml
-      # - ./image_providers.yaml:/app/image_providers.yaml
+      # 持久化服务商配置（Web 设置页写入的 API Key/模型等）
+      - ./config:/app/config
     environment:
-      - REDINK_AUTH_TOKEN=${REDINK_AUTH_TOKEN:-}
+      - REDINK_AUTH_TOKEN=${REDINK_AUTH_TOKEN:?Set REDINK_AUTH_TOKEN before exposing this service}
       - REDINK_RATE_LIMIT=${REDINK_RATE_LIMIT:-60 per minute}
+      - REDINK_RATE_LIMIT_STORAGE_URI=${REDINK_RATE_LIMIT_STORAGE_URI:-memory://}
       - REDINK_DEBUG=${REDINK_DEBUG:-false}
+      - REDINK_PORT=${REDINK_PORT:-12398}
+      - REDINK_GUNICORN_WORKERS=${REDINK_GUNICORN_WORKERS:-1}
+      - REDINK_GUNICORN_THREADS=${REDINK_GUNICORN_THREADS:-8}
+      - REDINK_GUNICORN_TIMEOUT=${REDINK_GUNICORN_TIMEOUT:-300}
+      - REDINK_ALLOW_PRIVATE_PROVIDER_URLS=${REDINK_ALLOW_PRIVATE_PROVIDER_URLS:-false}
+      - REDINK_ALLOW_UNPINNED_PROVIDER_URLS=${REDINK_ALLOW_UNPINNED_PROVIDER_URLS:-false}
+      - REDINK_MAX_CONTENT_LENGTH=${REDINK_MAX_CONTENT_LENGTH:-33554432}
+      - REDINK_MAX_BASE64_IMAGES=${REDINK_MAX_BASE64_IMAGES:-8}
+      - REDINK_MAX_BASE64_IMAGE_BYTES=${REDINK_MAX_BASE64_IMAGE_BYTES:-10485760}
+      - REDINK_MAX_BASE64_TOTAL_BYTES=${REDINK_MAX_BASE64_TOTAL_BYTES:-25165824}
+      - REDINK_MAX_HISTORY_ZIP_SOURCE_BYTES=${REDINK_MAX_HISTORY_ZIP_SOURCE_BYTES:-268435456}
+      - REDINK_REMOTE_IMAGE_MAX_BYTES=${REDINK_REMOTE_IMAGE_MAX_BYTES:-20971520}
+      - REDINK_TASK_STATE_TTL_SECONDS=${REDINK_TASK_STATE_TTL_SECONDS:-21600}
+      - REDINK_TEXT_PROVIDERS_PATH=${REDINK_TEXT_PROVIDERS_PATH:-/app/config/text_providers.yaml}
+      - REDINK_IMAGE_PROVIDERS_PATH=${REDINK_IMAGE_PROVIDERS_PATH:-/app/config/image_providers.yaml}
     restart: unless-stopped

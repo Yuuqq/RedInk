@@ -1,4 +1,4 @@
-export type SSEHandlers = Record<string, (data: any) => void>
+export type SSEHandlers = Record<string, (data: any) => void | Promise<void>>
 
 /**
  * Consume a fetch() Response body as Server-Sent Events (SSE).
@@ -18,7 +18,7 @@ export async function consumeSSE(response: Response, handlers: SSEHandlers) {
   let eventType = 'message'
   let dataLines: string[] = []
 
-  const dispatch = () => {
+  const dispatch = async () => {
     if (dataLines.length === 0) {
       eventType = 'message'
       return
@@ -35,17 +35,17 @@ export async function consumeSSE(response: Response, handlers: SSEHandlers) {
     }
 
     const handler = handlers[eventType] || handlers['message']
-    if (handler) handler(data)
+    if (handler) await handler(data)
 
     eventType = 'message'
   }
 
-  const handleLine = (line: string) => {
+  const handleLine = async (line: string) => {
     // Ignore comments
     if (line.startsWith(':')) return
 
     if (line === '') {
-      dispatch()
+      await dispatch()
       return
     }
 
@@ -77,15 +77,15 @@ export async function consumeSSE(response: Response, handlers: SSEHandlers) {
       buffer = buffer.slice(idx + 1)
       if (line.endsWith('\r')) line = line.slice(0, -1)
 
-      handleLine(line)
+      await handleLine(line)
     }
   }
 
   // Flush last event if stream ends without a trailing blank line
   if (buffer.length > 0) {
     if (buffer.endsWith('\r')) buffer = buffer.slice(0, -1)
-    handleLine(buffer)
+    await handleLine(buffer)
   }
-  dispatch()
+  await dispatch()
 }
 

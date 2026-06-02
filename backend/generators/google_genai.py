@@ -6,6 +6,11 @@ from google import genai
 from google.genai import types
 from .base import ImageGeneratorBase
 from ..utils.image_compressor import compress_image
+from ..utils.remote_image import (
+    allow_private_provider_urls,
+    allow_unpinned_provider_urls,
+    validate_public_http_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -303,9 +308,20 @@ class GoogleGenAIGenerator(ImageGeneratorBase):
 
         # 如果有 base_url，则配置 http_options
         if self.config.get('base_url'):
-            logger.debug(f"  使用自定义 base_url: {self.config['base_url']}")
+            if not allow_unpinned_provider_urls():
+                raise ValueError(
+                    "Google GenAI 自定义 Base URL 默认禁用。\n"
+                    "原因：Google SDK 管理底层 HTTP 连接，无法在本应用内固定已验证 IP，存在 DNS rebinding SSRF 风险。\n"
+                    "解决方案：留空 base_url 使用官方 Gemini API，或在可信内网部署时设置 REDINK_ALLOW_UNPINNED_PROVIDER_URLS=1。"
+                )
+            safe_base_url = validate_public_http_url(
+                self.config['base_url'],
+                label="服务商 Base URL",
+                allow_private=allow_private_provider_urls(),
+            )
+            logger.debug(f"  使用自定义 base_url: {safe_base_url}")
             client_kwargs["http_options"] = {
-                "base_url": self.config['base_url'],
+                "base_url": safe_base_url,
                 "api_version": "v1beta"
             }
 

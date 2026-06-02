@@ -44,6 +44,7 @@ class HistoryService:
 
         # 索引文件路径
         self.index_file = os.path.join(self.history_dir, "index.json")
+        self._lock = threading.RLock()
         self._init_index()
 
     def _safe_task_dir(self, task_id: str) -> Optional[Path]:
@@ -83,8 +84,7 @@ class HistoryService:
         如果索引文件不存在，则创建一个空索引
         """
         if not os.path.exists(self.index_file):
-            with open(self.index_file, "w", encoding="utf-8") as f:
-                json.dump({"records": []}, f, ensure_ascii=False, indent=2)
+            self._write_json_atomic(Path(self.index_file), {"records": []})
 
     def _load_index(self) -> Dict:
         """
@@ -95,8 +95,19 @@ class HistoryService:
         """
         try:
             with open(self.index_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+                index = json.load(f)
+            if not isinstance(index, dict):
+                logger.warning("历史索引格式错误：顶层不是对象，已按空索引处理")
+                return {"records": []}
+            records = index.get("records", [])
+            if not isinstance(records, list):
+                logger.warning("历史索引格式错误：records 不是数组，已按空索引处理")
+                index["records"] = []
+                return index
+            index["records"] = [r for r in records if isinstance(r, dict)]
+            return index
+        except Exception as e:
+            logger.warning(f"读取历史索引失败，已按空索引处理: {e}")
             return {"records": []}
 
     def _save_index(self, index: Dict) -> None:
@@ -106,8 +117,19 @@ class HistoryService:
         Args:
             index: 索引数据
         """
-        with open(self.index_file, "w", encoding="utf-8") as f:
-            json.dump(index, f, ensure_ascii=False, indent=2)
+        if not isinstance(index, dict):
+            index = {"records": []}
+        if not isinstance(index.get("records"), list):
+            index["records"] = []
+        self._write_json_atomic(Path(self.index_file), index)
+
+    def _write_json_atomic(self, path: Path, data: Dict) -> None:
+        """Write JSON through a temp file then replace to avoid partial files."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
 
     def _get_record_path(self, record_id: str) -> str:
         """
@@ -169,55 +191,55 @@ class HistoryService:
         状态流转：
             新建 -> draft（草稿状态）
         """
-        # Only persist safe task_ids to avoid poisoning later file operations.
-        if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
-            logger.warning(f"task_id 不安全，已忽略: {task_id}")
-            task_id = None
+        with self._lock:
+            # Only persist safe task_ids to avoid poisoning later file operations.
+            if task_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
+                logger.warning(f"task_id 不安全，已忽略: {task_id}")
+                task_id = None
 
-        # 生成唯一记录 ID
-        record_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+            # 生成唯一记录 ID
+            record_id = str(uuid.uuid4())
+            now = datetime.now().isoformat()
 
-        # 创建完整的记录对象
-        record = {
-            "id": record_id,
-            "title": topic,
-            "created_at": now,
-            "updated_at": now,
-            "outline": outline,  # 保存完整的大纲数据
-            "images": {
-                "task_id": task_id,
-                "generated": []  # 初始无生成图片
-            },
-            "content": {
-                "titles": [],
-                "copywriting": "",
-                "tags": []
-            },
-            "status": RecordStatus.DRAFT,  # 初始状态：草稿
-            "thumbnail": None  # 初始无缩略图
-        }
+            # 创建完整的记录对象
+            record = {
+                "id": record_id,
+                "title": topic,
+                "created_at": now,
+                "updated_at": now,
+                "outline": outline,  # 保存完整的大纲数据
+                "images": {
+                    "task_id": task_id,
+                    "generated": []  # 初始无生成图片
+                },
+                "content": {
+                    "titles": [],
+                    "copywriting": "",
+                    "tags": []
+                },
+                "status": RecordStatus.DRAFT,  # 初始状态：草稿
+                "thumbnail": None  # 初始无缩略图
+            }
 
-        # 保存完整记录到独立文件
-        record_path = self._get_record_path(record_id)
-        with open(record_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+            # 保存完整记录到独立文件
+            record_path = self._get_record_path(record_id)
+            self._write_json_atomic(Path(record_path), record)
 
-        # 更新索引（用于快速列表查询）
-        index = self._load_index()
-        index["records"].insert(0, {
-            "id": record_id,
-            "title": topic,
-            "created_at": now,
-            "updated_at": now,
-            "status": RecordStatus.DRAFT,  # 索引中也记录状态
-            "thumbnail": None,
-            "page_count": len(outline.get("pages", [])),  # 预期页数
-            "task_id": task_id
-        })
-        self._save_index(index)
+            # 更新索引（用于快速列表查询）
+            index = self._load_index()
+            index["records"].insert(0, {
+                "id": record_id,
+                "title": topic,
+                "created_at": now,
+                "updated_at": now,
+                "status": RecordStatus.DRAFT,  # 索引中也记录状态
+                "thumbnail": None,
+                "page_count": len(outline.get("pages", [])),  # 预期页数
+                "task_id": task_id
+            })
+            self._save_index(index)
 
-        return record_id
+            return record_id
 
     def get_record(self, record_id: str) -> Optional[Dict]:
         """
@@ -298,68 +320,68 @@ class HistoryService:
             partial -> generating: 继续生成剩余图片
             partial -> completed: 剩余图片生成完成
         """
-        # 获取现有记录
-        record = self.get_record(record_id)
-        if not record:
-            return False
+        with self._lock:
+            # 获取现有记录
+            record = self.get_record(record_id)
+            if not record:
+                return False
 
-        # 更新时间戳
-        now = datetime.now().isoformat()
-        record["updated_at"] = now
+            # 更新时间戳
+            now = datetime.now().isoformat()
+            record["updated_at"] = now
 
-        # 更新大纲内容（支持修改大纲）
-        if outline is not None:
-            record["outline"] = outline
+            # 更新大纲内容（支持修改大纲）
+            if outline is not None:
+                record["outline"] = outline
 
-        # 更新图片信息
-        if images is not None:
-            record["images"] = images
+            # 更新图片信息
+            if images is not None:
+                record["images"] = images
 
-        # 更新内容信息（标题/文案/标签）
-        if content is not None:
-            record["content"] = content
+            # 更新内容信息（标题/文案/标签）
+            if content is not None:
+                record["content"] = content
 
-        # 更新状态（状态流转）
-        if status is not None:
-            record["status"] = status
+            # 更新状态（状态流转）
+            if status is not None:
+                record["status"] = status
 
-        # 更新缩略图
-        if thumbnail is not None:
-            record["thumbnail"] = thumbnail
+            # 更新缩略图
+            if thumbnail is not None:
+                record["thumbnail"] = thumbnail
 
-        # 保存完整记录
-        record_path = self._get_record_path(record_id)
-        if not record_path:
-            return False
-        with open(record_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+            # 保存完整记录
+            record_path = self._get_record_path(record_id)
+            if not record_path:
+                return False
+            self._write_json_atomic(Path(record_path), record)
 
-        # 同步更新索引
-        index = self._load_index()
-        for idx_record in index["records"]:
-            if idx_record["id"] == record_id:
-                idx_record["updated_at"] = now
+            # 同步更新索引
+            index = self._load_index()
+            for idx_record in index["records"]:
+                if idx_record.get("id") == record_id:
+                    idx_record["updated_at"] = now
 
-                # 更新状态
-                if status is not None:
-                    idx_record["status"] = status
+                    # 更新状态
+                    if status is not None:
+                        idx_record["status"] = status
 
-                # 更新缩略图
-                if thumbnail is not None:
-                    idx_record["thumbnail"] = thumbnail
+                    # 更新缩略图
+                    if thumbnail is not None:
+                        idx_record["thumbnail"] = thumbnail
 
-                # 更新页数（如果大纲被修改）
-                if outline is not None:
-                    idx_record["page_count"] = len(outline.get("pages", []))
+                    # 更新页数（如果大纲被修改）
+                    if outline is not None:
+                        idx_record["page_count"] = len(outline.get("pages", []))
 
-                # 更新任务 ID
-                if images is not None:
-                    idx_record["task_id"] = images.get("task_id")
+                    # 更新任务 ID
+                    if images is not None:
+                        idx_record["task_id"] = images.get("task_id")
 
-                break
+                    break
 
-        self._save_index(index)
-        return True
+            self._save_index(index)
+            return True
 
     def delete_record(self, record_id: str) -> bool:
         """
@@ -376,49 +398,69 @@ class HistoryService:
         Returns:
             bool: 删除是否成功，记录不存在时返回 False
         """
-        record = self.get_record(record_id)
-        if not record:
-            return False
+        with self._lock:
+            record = self.get_record(record_id)
+            if not record:
+                return False
 
-        # 删除关联的任务图片目录
-        if record.get("images") and record["images"].get("task_id"):
-            task_id = record["images"]["task_id"]
-            # 防止路径遍历/符号链接导致误删任意目录
-            if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
-                try:
-                    base = Path(self.history_dir).resolve()
-                    raw_dir = (Path(self.history_dir) / str(task_id))
-
-                    # Never delete symlinks
-                    if raw_dir.is_symlink():
-                        logger.warning(f"跳过符号链接任务目录: {raw_dir}")
+            # 删除关联的任务图片目录
+            if record.get("images") and record["images"].get("task_id"):
+                task_id = record["images"]["task_id"]
+                # 防止路径遍历/符号链接导致误删任意目录
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", str(task_id) or ""):
+                    if self._task_id_has_other_record(task_id, exclude_record_id=record_id):
+                        logger.info(f"任务目录仍被其它历史记录引用，跳过删除: {task_id}")
                     else:
-                        resolved = raw_dir.resolve()
-                        resolved.relative_to(base)
-                        if resolved.exists() and resolved.is_dir():
-                            import shutil
-                            shutil.rmtree(str(resolved))
-                            logger.info(f"已删除任务目录: {resolved}")
-                except Exception as e:
-                    logger.error(f"删除任务目录失败: {task_id}, {e}")
-            else:
-                logger.warning(f"任务目录 task_id 不安全，已跳过删除: {task_id}")
+                        try:
+                            base = Path(self.history_dir).resolve()
+                            raw_dir = (Path(self.history_dir) / str(task_id))
 
-        # 删除记录 JSON 文件
-        record_path = self._get_record_path(record_id)
-        if not record_path:
-            return False
-        try:
-            os.remove(record_path)
-        except Exception:
-            return False
+                            # Never delete symlinks
+                            if raw_dir.is_symlink():
+                                logger.warning(f"跳过符号链接任务目录: {raw_dir}")
+                            else:
+                                resolved = raw_dir.resolve()
+                                resolved.relative_to(base)
+                                if resolved.exists() and resolved.is_dir():
+                                    import shutil
+                                    shutil.rmtree(str(resolved))
+                                    logger.info(f"已删除任务目录: {resolved}")
+                        except Exception as e:
+                            logger.error(f"删除任务目录失败: {task_id}, {e}")
+                else:
+                    logger.warning(f"任务目录 task_id 不安全，已跳过删除: {task_id}")
 
-        # 从索引中移除
+            # 删除记录 JSON 文件
+            record_path = self._get_record_path(record_id)
+            if not record_path:
+                return False
+            try:
+                os.remove(record_path)
+            except Exception:
+                return False
+
+            # 从索引中移除
+            index = self._load_index()
+            index["records"] = [r for r in index["records"] if r.get("id") != record_id]
+            self._save_index(index)
+
+            return True
+
+    def _task_id_has_other_record(self, task_id: str, *, exclude_record_id: str) -> bool:
         index = self._load_index()
-        index["records"] = [r for r in index["records"] if r["id"] != record_id]
-        self._save_index(index)
+        for rec in index.get("records", []):
+            rid = rec.get("id")
+            if not rid or rid == exclude_record_id:
+                continue
 
-        return True
+            if rec.get("task_id") == task_id:
+                return True
+
+            detail = self.get_record(rid)
+            if detail and (detail.get("images") or {}).get("task_id") == task_id:
+                return True
+
+        return False
 
     def list_records(
         self,
@@ -574,9 +616,12 @@ class HistoryService:
             record_id = None
             for rec in index.get("records", []):
                 # 通过遍历所有记录，找到 task_id 匹配的记录
-                record_detail = self.get_record(rec["id"])
+                rid = rec.get("id") if isinstance(rec, dict) else None
+                if not rid:
+                    continue
+                record_detail = self.get_record(rid)
                 if record_detail and record_detail.get("images", {}).get("task_id") == task_id:
-                    record_id = rec["id"]
+                    record_id = rid
                     break
 
             if record_id:

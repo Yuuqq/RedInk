@@ -127,26 +127,19 @@ async function handleGenerate() {
     const result = await generateOutline(topic.value.trim(), imageFiles.length > 0 ? imageFiles : undefined)
 
     if (result.success && result.pages) {
-      store.setTopic(topic.value.trim())
-      store.setOutline(result.outline || '', result.pages)
+      const historyResult = await createHistory(topic.value.trim(), {
+        raw: result.outline || '',
+        pages: result.pages
+      })
 
-      try {
-        const historyResult = await createHistory(topic.value.trim(), {
-          raw: result.outline || '',
-          pages: result.pages
-        })
-
-        if (historyResult.success && historyResult.record_id) {
-          store.setRecordId(historyResult.record_id)
-        } else {
-          console.error('创建历史记录失败:', historyResult.error || '未知错误')
-          store.setRecordId(null)
-        }
-      } catch (err: any) {
-        console.error('创建历史记录异常:', err.message || err)
-        store.setRecordId(null)
+      if (!historyResult.success || !historyResult.record_id) {
+        error.value = '大纲已生成，但创建历史记录失败: ' + (historyResult.error || '未知错误')
+        return
       }
 
+      store.setTopic(topic.value.trim())
+      store.setOutline(result.outline || '', result.pages)
+      store.setRecordId(historyResult.record_id)
       store.userImages = imageFiles.length > 0 ? imageFiles : []
 
       composerRef.value?.clearPreviews()

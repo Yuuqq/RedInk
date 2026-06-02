@@ -17,7 +17,7 @@
           <div>
             <h2 class="section-title">访问控制</h2>
             <p class="section-desc">
-              当后端启用 <span class="mono">REDINK_AUTH_TOKEN</span> 时，需要在此填写同样的 Token 才能正常访问 API（生成/历史/管理面板等）
+              当后端启用 <span class="mono">REDINK_AUTH_TOKEN</span> 时，需要在此填写同样的 Token 才能正常访问 API 和受保护图片（生成/历史/管理面板等）
             </p>
           </div>
           <div class="auth-actions">
@@ -39,7 +39,7 @@
             placeholder="Bearer Token（仅保存在当前浏览器）"
           />
           <p class="auth-hint">
-            将以请求头 <span class="mono">Authorization: Bearer &lt;token&gt;</span> 发送；留空表示不发送。
+            API 请求会发送 <span class="mono">Authorization: Bearer &lt;token&gt;</span>；图片展示会同步一个仅限 <span class="mono">/api/images</span> 的同站 Cookie。留空表示不发送。
           </p>
         </div>
       </div>
@@ -172,6 +172,7 @@ const {
 
   // 方法
   loadConfig,
+  resetConfig,
 
   // 文本服务商方法
   activateTextProvider,
@@ -201,11 +202,13 @@ const authToken = ref(getAuthToken())
 function onSaveAuthToken() {
   setAuthToken(authToken.value)
   authToken.value = getAuthToken()
+  loadConfig()
 }
 
 function onClearAuthToken() {
   clearAuthToken()
   authToken.value = ''
+  resetConfig()
 }
 
 onMounted(() => {

@@ -73,8 +73,34 @@ export async function generateOutline(
 // 获取图片 URL（新格式：task_id/filename）
 // thumbnail 参数：true=缩略图（默认），false=原图
 export function getImageUrl(taskId: string, filename: string, thumbnail: boolean = true): string {
+  // Sync the image auth cookie before rendering <img src=...> URLs. Axios
+  // headers do not apply to browser image requests.
+  getAuthToken()
   const thumbParam = thumbnail ? '?thumbnail=true' : '?thumbnail=false'
-  return `${API_BASE_URL}/images/${taskId}/${filename}${thumbParam}`
+  return `${API_BASE_URL}/images/${encodeURIComponent(taskId)}/${encodeURIComponent(filename)}${thumbParam}`
+}
+
+export function getOriginalImageUrlFromDisplayUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url, window.location.origin)
+    if (parsed.origin !== window.location.origin) {
+      return null
+    }
+
+    const prefix = `${API_BASE_URL}/images/`
+    if (!parsed.pathname.startsWith(prefix)) {
+      return null
+    }
+
+    const parts = parsed.pathname.slice(prefix.length).split('/')
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+      return null
+    }
+
+    return `${parsed.pathname}?thumbnail=false`
+  } catch {
+    return null
+  }
 }
 
 // 重新生成图片（即使成功的也可以重新生成）
@@ -103,11 +129,11 @@ export async function regenerateImage(
 export async function retryFailedImages(
   taskId: string,
   pages: Page[],
-  onProgress: (event: ProgressEvent) => void,
-  onComplete: (event: ProgressEvent) => void,
-  onError: (event: ProgressEvent) => void,
-  onFinish: (event: { success: boolean; total: number; completed: number; failed: number }) => void,
-  onStreamError: (error: Error) => void
+  onProgress: (event: ProgressEvent) => void | Promise<void>,
+  onComplete: (event: ProgressEvent) => void | Promise<void>,
+  onError: (event: ProgressEvent) => void | Promise<void>,
+  onFinish: (event: { success: boolean; total: number; completed: number; failed: number }) => void | Promise<void>,
+  onStreamError: (error: Error) => void | Promise<void>
 ) {
   try {
     const token = getAuthToken()
@@ -128,17 +154,23 @@ export async function retryFailedImages(
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      throw new Error(await _fetchErrorMessage(response, '重试请求失败'))
     }
 
+    let finishEvent: { success: boolean; total: number; completed: number; failed: number } | null = null
     await consumeSSE(response, {
       retry_start: (data: any) => onProgress({ index: -1, status: 'generating', message: data?.message }),
       complete: (data: any) => onComplete(data),
       error: (data: any) => onError(data),
-      retry_finish: (data: any) => onFinish(data),
+      retry_finish: (data: any) => {
+        finishEvent = data
+      },
     })
+    if (finishEvent) {
+      await onFinish(finishEvent)
+    }
   } catch (error) {
-    onStreamError(error as Error)
+    await onStreamError(error as Error)
   }
 }
 
@@ -200,6 +232,7 @@ export interface UpdateHistoryParams {
   images?: { task_id: string | null; generated: Array<string | null> }
   content?: { titles: string[]; copywriting: string; tags: string[] }
   status?: string
+  /** Thumbnail image filename stored in the task directory, e.g. "0.png". */
   thumbnail?: string
 }
 
@@ -232,7 +265,7 @@ export interface UpdateHistoryParams {
  *   'task-123'
  * )
  * if (result.success) {
- *   console.log('记录创建成功，ID:', result.record_id)
+ *   // result.record_id contains the created history id
  * }
  * ```
  */
@@ -396,7 +429,7 @@ export async function getHistory(recordId: string): Promise<{
  * @param data.outline - 可选，更新大纲数据
  * @param data.images - 可选，更新图片数据（任务 ID 和已生成的图片列表）
  * @param data.status - 可选，更新状态（如 'draft', 'generating', 'completed'）
- * @param data.thumbnail - 可选，更新缩略图 URL
+ * @param data.thumbnail - 可选，更新缩略图文件名（例如 "0.png"）
  *
  * @returns Promise<{ success: boolean; error?: string }>
  * - success: 是否更新成功
@@ -417,7 +450,7 @@ export async function getHistory(recordId: string): Promise<{
  *
  * // 更新缩略图
  * await updateHistory('record-123', {
- *   thumbnail: '/api/images/task-456/page1.png?thumbnail=true'
+ *   thumbnail: '0.png'
  * })
  * ```
  */
@@ -465,7 +498,6 @@ export async function updateHistory(
  * if (recordId) {
  *   const exists = await checkHistoryExists(recordId)
  *   if (!exists) {
- *     console.log('记录不存在，可能已被删除')
  *     localStorage.removeItem('currentRecordId')
  *   }
  * }
@@ -595,11 +627,11 @@ export async function generateImagesPost(
   pages: Page[],
   taskId: string | null,
   fullOutline: string,
-  onProgress: (event: ProgressEvent) => void,
-  onComplete: (event: ProgressEvent) => void,
-  onError: (event: ProgressEvent) => void,
-  onFinish: (event: FinishEvent) => void,
-  onStreamError: (error: Error) => void,
+  onProgress: (event: ProgressEvent) => void | Promise<void>,
+  onComplete: (event: ProgressEvent) => void | Promise<void>,
+  onError: (event: ProgressEvent) => void | Promise<void>,
+  onFinish: (event: FinishEvent) => void | Promise<void>,
+  onStreamError: (error: Error) => void | Promise<void>,
   userImages?: File[],
   userTopic?: string,
   styleHint?: string
@@ -642,18 +674,44 @@ export async function generateImagesPost(
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      throw new Error(await _fetchErrorMessage(response, '图片生成请求失败'))
     }
 
+    let finishEvent: FinishEvent | null = null
     await consumeSSE(response, {
       progress: (data: any) => onProgress(data),
       complete: (data: any) => onComplete(data),
       error: (data: any) => onError(data),
-      finish: (data: any) => onFinish(data),
+      finish: (data: any) => {
+        finishEvent = data
+      },
     })
+    if (finishEvent) {
+      await onFinish(finishEvent)
+    }
   } catch (error) {
-    onStreamError(error as Error)
+    await onStreamError(error as Error)
   }
+}
+
+async function _fetchErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const contentType = response.headers.get('content-type') || ''
+    if (contentType.includes('application/json')) {
+      const data = await response.json()
+      if (typeof data?.error === 'string') {
+        return data.error
+      }
+    } else {
+      const text = await response.text()
+      if (text.trim()) {
+        return text.trim().slice(0, 500)
+      }
+    }
+  } catch {
+    // Ignore body parsing failures and fall back to the status code.
+  }
+  return `${fallback}: HTTP ${response.status}`
 }
 
 export async function cancelTask(taskId: string): Promise<{ success: boolean; task_id?: string; error?: string }> {
@@ -679,8 +737,24 @@ export async function scanAllTasks(): Promise<{
   results?: any[]
   error?: string
 }> {
-  const response = await http.post(`${API_BASE_URL}/history/scan-all`)
-  return response.data
+  try {
+    const response = await http.post(`${API_BASE_URL}/history/scan-all`, {}, {
+      timeout: 30000
+    })
+    return response.data
+  } catch (error: any) {
+    if (isAxiosError(error)) {
+      if (error.code === 'ECONNABORTED') {
+        return { success: false, error: '扫描超时，请稍后重试' }
+      }
+      if (!error.response) {
+        return { success: false, error: '网络连接失败，请检查网络设置' }
+      }
+      const errorMessage = error.response?.data?.error || error.message || '同步历史失败'
+      return { success: false, error: errorMessage }
+    }
+    return { success: false, error: '未知错误，请稍后重试' }
+  }
 }
 
 export async function downloadHistoryZip(recordId: string): Promise<{
@@ -696,7 +770,7 @@ export async function downloadHistoryZip(recordId: string): Promise<{
     })
 
     const cd = (resp.headers as any)?.['content-disposition'] as string | undefined
-    const filename = _filenameFromContentDisposition(cd) || 'images.zip'
+    const filename = _safeDownloadFilename(_filenameFromContentDisposition(cd), 'images.zip')
     return { success: true, blob: resp.data as Blob, filename }
   } catch (error: any) {
     if (isAxiosError(error)) {
@@ -738,6 +812,16 @@ function _filenameFromContentDisposition(value?: string): string | null {
 
   const match = /filename\s*=\s*\"?([^\";]+)\"?/i.exec(value)
   return match && match[1] ? match[1].trim() : null
+}
+
+function _safeDownloadFilename(value: string | null, fallback: string): string {
+  if (!value) return fallback
+  const cleaned = value
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .trim()
+    .slice(0, 180)
+  return cleaned || fallback
 }
 
 // ==================== 配置管理 API ====================
@@ -790,14 +874,35 @@ export async function listAdminTasks(): Promise<{ success: boolean; tasks?: Admi
   return resp.data
 }
 
+export interface CleanupAdminTaskResult {
+  success: boolean
+  task_id?: string
+  existed_in_memory?: boolean
+  deleted_files?: boolean
+  referenced?: boolean
+  error?: string
+}
+
 export async function cleanupAdminTask(
   taskId: string,
-  deleteFiles: boolean = false
-): Promise<{ success: boolean; task_id?: string; existed_in_memory?: boolean; deleted_files?: boolean; error?: string }> {
-  const resp = await http.delete(`${API_BASE_URL}/admin/tasks/${encodeURIComponent(taskId)}`, {
-    params: { delete_files: deleteFiles ? 'true' : 'false' }
-  })
-  return resp.data
+  deleteFiles: boolean = false,
+  confirmDeleteReferenced: boolean = false
+): Promise<CleanupAdminTaskResult> {
+  try {
+    const params: Record<string, string> = { delete_files: deleteFiles ? 'true' : 'false' }
+    if (confirmDeleteReferenced) {
+      params.confirm_delete_referenced = 'YES_DELETE_REFERENCED_TASK'
+    }
+    const resp = await http.delete(`${API_BASE_URL}/admin/tasks/${encodeURIComponent(taskId)}`, {
+      params
+    })
+    return resp.data
+  } catch (error: any) {
+    if (isAxiosError(error) && error.response?.data && typeof error.response.data === 'object') {
+      return error.response.data as CleanupAdminTaskResult
+    }
+    return { success: false, error: _axiosErrorMessage(error, '清理任务失败') }
+  }
 }
 
 export async function getAdminLogs(params?: {
@@ -808,8 +913,57 @@ export async function getAdminLogs(params?: {
   return resp.data
 }
 
-export function getAdminLogsDownloadUrl(): string {
-  return `${API_BASE_URL}/admin/logs/download`
+export async function downloadAdminLogs(): Promise<{
+  success: boolean
+  blob?: Blob
+  filename?: string
+  error?: string
+}> {
+  try {
+    const resp = await http.get(`${API_BASE_URL}/admin/logs/download`, {
+      responseType: 'blob',
+      timeout: 60000
+    })
+
+    const cd = (resp.headers as any)?.['content-disposition'] as string | undefined
+    const filename = _safeDownloadFilename(_filenameFromContentDisposition(cd), 'redink.log')
+    return { success: true, blob: resp.data as Blob, filename }
+  } catch (error: any) {
+    if (isAxiosError(error)) {
+      let message: string | undefined
+      const data = error.response?.data as any
+      if (typeof data?.error === 'string') {
+        message = data.error
+      } else if (typeof Blob !== 'undefined' && data instanceof Blob) {
+        try {
+          const text = await data.text()
+          const parsed = JSON.parse(text)
+          if (typeof parsed?.error === 'string') {
+            message = parsed.error
+          }
+        } catch {
+          // ignore blob/json parsing failures
+        }
+      }
+
+      const errorMessage = message || error.message || '下载日志失败'
+      return { success: false, error: errorMessage }
+    }
+    return { success: false, error: '未知错误，请稍后重试' }
+  }
+}
+
+function _axiosErrorMessage(error: any, fallback: string): string {
+  if (isAxiosError(error)) {
+    if (error.code === 'ECONNABORTED') {
+      return '请求超时，请检查网络连接'
+    }
+    if (!error.response) {
+      return '网络连接失败，请检查网络设置'
+    }
+    return error.response?.data?.error || error.message || fallback
+  }
+  return fallback
 }
 
 export async function rotateAdminLogs(): Promise<{ success: boolean; rotated?: boolean; log_file?: string; error?: string }> {
@@ -842,8 +996,12 @@ export async function getConfig(): Promise<{
   config?: Config
   error?: string
 }> {
-  const response = await http.get(`${API_BASE_URL}/config`)
-  return response.data
+  try {
+    const response = await http.get(`${API_BASE_URL}/config`)
+    return response.data
+  } catch (error: any) {
+    return { success: false, error: _axiosErrorMessage(error, '获取配置失败') }
+  }
 }
 
 // 更新配置
@@ -852,24 +1010,34 @@ export async function updateConfig(config: Partial<Config>): Promise<{
   message?: string
   error?: string
 }> {
-  const response = await http.post(`${API_BASE_URL}/config`, config)
-  return response.data
+  try {
+    const response = await http.post(`${API_BASE_URL}/config`, config)
+    return response.data
+  } catch (error: any) {
+    return { success: false, error: _axiosErrorMessage(error, '更新配置失败') }
+  }
 }
 
 // 测试服务商连接
 export async function testConnection(config: {
   type: string
+  provider_category?: 'text' | 'image'
   provider_name?: string
   api_key?: string
   base_url?: string
   model: string
+  endpoint_type?: string
 }): Promise<{
   success: boolean
   message?: string
   error?: string
 }> {
-  const response = await http.post(`${API_BASE_URL}/config/test`, config)
-  return response.data
+  try {
+    const response = await http.post(`${API_BASE_URL}/config/test`, config)
+    return response.data
+  } catch (error: any) {
+    return { success: false, error: _axiosErrorMessage(error, '测试连接失败') }
+  }
 }
 
 // ==================== 内容生成 API（标题、文案、标签） ====================

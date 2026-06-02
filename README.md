@@ -115,16 +115,23 @@
 使用本仓库自带的 `docker-compose.yml`：
 
 ```bash
+export REDINK_AUTH_TOKEN='change-this-to-a-long-random-token'
 docker compose up -d --build
 ```
 
-访问 http://localhost:12398，在 Web 界面的**设置页面**配置你的 API Key 即可使用。
+访问 http://localhost:12398，先在前端「系统设置」顶部填写同一个 `REDINK_AUTH_TOKEN`，再配置你的 API Key 即可使用。
 
 **Docker 部署说明：**
+- `docker-compose.yml` 会强制要求设置 `REDINK_AUTH_TOKEN`，避免无认证暴露生成、配置、历史和管理接口
+- Docker 镜像默认用 Gunicorn 启动 Flask，不再使用 Flask 开发服务器
+- 默认端口为 `12398`；如需修改，设置 `REDINK_PORT=<port>`，Compose 会同步更新容器监听端口、宿主端口映射和健康检查端口
+- 默认 `REDINK_GUNICORN_WORKERS=1`、`REDINK_GUNICORN_THREADS=8`，因为进行中的图片生成任务状态保存在当前进程内；除非你已外置任务状态，否则不要提高 workers
+- 可按需设置 `REDINK_GUNICORN_TIMEOUT=300` 以适配较慢的图片生成上游
 - 容器内不包含任何 API Key，需要在 Web 界面配置
-- 使用 `-v ./history:/app/history` 持久化历史记录
-- 使用 `-v ./output:/app/output` 持久化生成的图片
-- 可选：挂载自定义配置文件 `-v ./text_providers.yaml:/app/text_providers.yaml`
+- 使用 `-v ./history:/app/history` 持久化历史记录、原图与缩略图
+- 使用 `-v ./config:/app/config` 持久化服务商配置（Web 设置页保存的 API Key、模型、Base URL 等）；容器启动时会在缺失时写入默认模板，不会覆盖已有配置
+- Compose 默认将 `REDINK_TEXT_PROVIDERS_PATH` / `REDINK_IMAGE_PROVIDERS_PATH` 指向 `/app/config/*.yaml`
+- 如需连接本机或内网 API 网关，请显式设置 `REDINK_ALLOW_PRIVATE_PROVIDER_URLS=1`
 
 ---
 
@@ -179,9 +186,12 @@ pnpm install
 
 **启动后端:**
 ```bash
+export REDINK_AUTH_TOKEN='change-this-to-a-long-random-token'
 uv run python -m backend.app
 ```
 访问: http://localhost:12398
+
+后端默认拒绝无认证启动，即使监听 `127.0.0.1`。原因是反向代理常把公网请求转发为本机 loopback 流量，应用无法仅凭来源地址判断是否安全。请设置 `REDINK_AUTH_TOKEN=<your-token>`；仅在明确隔离的本地/内网环境中可设置 `REDINK_ALLOW_UNAUTH_REMOTE=1` 覆盖该保护。
 
 **启动前端:**
 ```bash
@@ -217,11 +227,27 @@ pnpm dev
 
 ### API 访问控制（上线强烈推荐）
 
-如果你的服务不是只在本机使用（例如部署到服务器或对外网开放端口），强烈建议设置：
+上线或本地手动运行都建议设置：
 
-- `REDINK_AUTH_TOKEN=<your-token>`：启用大多数 `/api/*` 的 Bearer Token 认证（默认豁免 `/api/health` 与 `/api/images/*`，便于 healthcheck 与 `<img>` 加载）。
+- `REDINK_AUTH_TOKEN=<your-token>`：启用 `/api/*` 访问控制。`/api/health` 默认豁免用于 healthcheck；`/api/images/*` 需要 Bearer Token 或前端写入的同站图片访问 Cookie。
 
-前端「系统设置」页面顶部提供了“访问控制”输入框：填入同样的 Token 后即可正常调用 API（包括生成/历史/管理面板等；Token 仅保存在当前浏览器本地存储）。
+前端「系统设置」页面顶部提供了“访问控制”输入框：填入同样的 Token 后即可正常调用 API（包括生成/历史/管理面板等；Token 保存在当前浏览器本地存储，并同步一个仅限 `/api/images` 路径的 SameSite Cookie 用于图片展示）。
+
+安全默认值：
+- 后端默认拒绝无认证启动；不要依赖 `127.0.0.1` 作为安全边界，因为反向代理部署下公网请求也可能以 loopback 形式到达应用
+- Docker Compose 部署要求显式提供 `REDINK_AUTH_TOKEN`
+- 未设置 `REDINK_AUTH_TOKEN` 时，启动保护和请求级保护都会拒绝访问
+- `REDINK_ALLOW_UNAUTH_REMOTE=1` 仅用于你确认网络边界已被其它方式保护的场景
+- 服务商 `base_url` 默认只能解析到公网地址，防止服务端请求打到内网、loopback 或云元数据地址
+- 如需使用本机/内网代理网关，设置 `REDINK_ALLOW_PRIVATE_PROVIDER_URLS=1`；即使开启该选项，link-local 元数据地址仍会被拒绝
+- OpenAI-Compatible / Image API 请求会固定已验证 IP，降低 DNS rebinding 风险；Google GenAI 自定义 `base_url` 无法由应用固定 SDK 连接 IP，默认禁用，可信网络确需使用时再设置 `REDINK_ALLOW_UNPINNED_PROVIDER_URLS=1`
+
+### 限流与反向代理
+
+- `REDINK_RATE_LIMIT=60 per minute`：默认 API 限流规则。
+- `REDINK_RATE_LIMIT_STORAGE_URI=memory://`：默认单进程内存限流存储，适合本仓库默认 Docker 配置。
+- 如需多容器或多 worker 部署，请改用 Flask-Limiter 支持的共享存储 URI，并确保镜像内安装对应存储驱动。
+- 如果放在反向代理后，默认按直接连接到 Flask/Gunicorn 的客户端 IP 限流；需要真实客户端 IP 时，请在受控反向代理层处理和转发，不要直接信任公网传入的 `X-Forwarded-For`。
 
 ### 上传/请求体大小限制
 
@@ -233,7 +259,21 @@ pnpm dev
 ### CLIProxyAPI / OpenAI-Compatible 代理快速接入
 
 如果你有本地代理（例如 CLIProxyAPI），可以在 `/admin` 的“快速接入”中一键写入配置，
-也可以手动在 `text_providers.yaml` / `image_providers.yaml` 中设置 `base_url` 和 `api_key`。
+也可以手动在 `text_providers.yaml` / `image_providers.yaml` 中设置 `base_url` 和 `api_key`。Docker Compose 部署时默认使用 `./config/text_providers.yaml` 和 `./config/image_providers.yaml`，也可以通过 `REDINK_TEXT_PROVIDERS_PATH` / `REDINK_IMAGE_PROVIDERS_PATH` 指向其它路径；两者必须是不同文件，否则后端会拒绝启动/保存配置，避免文本与图片服务商配置互相覆盖。
+
+默认情况下，服务商 `base_url` 必须解析到公网地址；本机代理、Docker bridge、局域网网关等私有地址会被拒绝，避免 SSRF 风险。确认你的代理网关可信且只在受控网络中使用时，可设置：
+
+```bash
+export REDINK_ALLOW_PRIVATE_PROVIDER_URLS=1
+```
+
+注意：`169.254.0.0/16` 等 link-local/云元数据地址始终被拒绝。
+
+OpenAI-Compatible / Image API 请求会在发起请求前固定已验证 IP，降低 DNS rebinding 风险。Google GenAI 的自定义 `base_url` 由 Google SDK 管理底层连接，应用无法固定连接 IP，因此默认禁用；留空 `base_url` 会继续使用官方 Gemini API。仅在可信网络中确需 Google GenAI 自定义网关时，再同时设置：
+
+```bash
+export REDINK_ALLOW_UNPINNED_PROVIDER_URLS=1
+```
 
 ### 文本生成配置
 

@@ -54,6 +54,11 @@ def create_outline_blueprint():
                     "success": False,
                     "error": "参数错误：topic 不能为空。\n请提供要生成图文的主题内容。"
                 }), 400
+            if not isinstance(topic, str):
+                return jsonify({
+                    "success": False,
+                    "error": "参数错误：topic 必须是字符串"
+                }), 400
 
             # 调用大纲生成服务
             logger.info(f"🔄 开始生成大纲，主题: {topic[:50]}...")

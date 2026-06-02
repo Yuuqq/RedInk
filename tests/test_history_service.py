@@ -78,6 +78,24 @@ class TestCreateRecord:
         assert record["images"]["task_id"] == "task_abc123"
         assert record["images"]["generated"] == []
 
+    def test_create_record_recovers_from_malformed_index(self, history_service, sample_outline):
+        """A malformed index file should not crash new history creation."""
+        with open(history_service.index_file, "w", encoding="utf-8") as f:
+            f.write('{"records": "not-a-list"}')
+
+        record_id = history_service.create_record("Recover index", sample_outline)
+
+        index = history_service._load_index()
+        assert [r["id"] for r in index["records"]] == [record_id]
+
+    def test_create_record_uses_atomic_json_write(self, history_service, sample_outline):
+        """Normal writes should not leave temp JSON files behind."""
+        record_id = history_service.create_record("Atomic write", sample_outline)
+
+        assert history_service.get_record(record_id) is not None
+        assert not os.path.exists(history_service.index_file + ".tmp")
+        assert not os.path.exists(history_service._get_record_path(record_id) + ".tmp")
+
 
 # ---------- get_record ----------
 
@@ -186,6 +204,26 @@ class TestDeleteRecord:
         result = history_service.delete_record("ghost-record-id")
 
         assert result is False
+
+    def test_delete_record_keeps_task_dir_when_still_referenced(self, history_service, sample_outline):
+        """Deleting one of multiple records sharing a task_id must not remove shared images."""
+        task_id = "task_shared"
+        first_id = history_service.create_record("First", sample_outline, task_id=task_id)
+        second_id = history_service.create_record("Second", sample_outline, task_id=task_id)
+        task_dir = os.path.join(history_service.history_dir, task_id)
+        os.makedirs(task_dir, exist_ok=True)
+        image_path = os.path.join(task_dir, "0.png")
+        with open(image_path, "wb") as f:
+            f.write(b"image")
+
+        assert history_service.delete_record(first_id) is True
+
+        assert os.path.exists(task_dir)
+        assert os.path.exists(image_path)
+        assert history_service.get_record(second_id) is not None
+
+        assert history_service.delete_record(second_id) is True
+        assert not os.path.exists(task_dir)
 
 
 # ---------- list_records ----------

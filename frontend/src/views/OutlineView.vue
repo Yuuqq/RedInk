@@ -6,8 +6,10 @@
         <p class="page-subtitle">
           调整页面顺序，修改文案，打造完美内容
           <span v-if="isSaving" class="pill pill-info">保存中...</span>
+          <span v-else-if="saveError" class="pill pill-danger">保存失败</span>
           <span v-else class="pill pill-success">已保存</span>
         </p>
+        <p v-if="saveError" class="save-error">{{ saveError }}</p>
       </div>
       <div class="page-actions">
         <div class="style-select">
@@ -94,6 +96,7 @@ const dragOverIndex = ref<number | null>(null)
 const draggedIndex = ref<number | null>(null)
 // 保存状态指示
 const isSaving = ref(false)
+const saveError = ref('')
 
 const getPageTypeName = (type: string) => {
   const names = {
@@ -149,7 +152,11 @@ const startGeneration = async () => {
   if (saveTimer !== null) {
     clearTimeout(saveTimer)
     saveTimer = null
-    await autoSaveOutline()
+  }
+
+  const saved = await autoSaveOutline()
+  if (!saved) {
+    return
   }
   router.push('/generate')
 }
@@ -163,16 +170,16 @@ let saveTimer: number | null = null
  * 自动保存大纲到历史记录
  * 当大纲内容发生变化时，自动更新到后端
  */
-const autoSaveOutline = async () => {
+const autoSaveOutline = async (): Promise<boolean> => {
   // 如果没有 recordId，说明还未创建历史记录，无法自动保存
   if (!store.recordId) {
-    console.warn('未找到历史记录ID，无法自动保存')
-    return
+    saveError.value = '未找到历史记录ID，无法保存。请返回首页重新创建。'
+    return false
   }
 
   // 如果没有大纲内容，不需要保存
   if (!store.outline.pages || store.outline.pages.length === 0) {
-    return
+    return true
   }
 
   try {
@@ -187,12 +194,15 @@ const autoSaveOutline = async () => {
     })
 
     if (!result.success) {
-      console.error('自动保存失败:', result.error)
-    } else {
-      console.log('大纲已自动保存')
+      saveError.value = result.error || '自动保存失败'
+      return false
     }
+    saveError.value = ''
+    store.markSaved()
+    return true
   } catch (error) {
-    console.error('自动保存出错:', error)
+    saveError.value = '自动保存出错: ' + String(error)
+    return false
   } finally {
     isSaving.value = false
   }
@@ -222,14 +232,11 @@ const debouncedSave = () => {
 const checkAndCreateHistory = async () => {
   // 如果已经有 recordId，无需创建
   if (store.recordId) {
-    console.log('已存在历史记录ID:', store.recordId)
     return
   }
 
   // 如果有大纲数据但没有 recordId，说明是异常情况，尝试创建
   if (store.outline.pages && store.outline.pages.length > 0) {
-    console.log('检测到大纲数据但无历史记录ID，尝试创建历史记录')
-
     try {
       const result = await createHistory(
         store.topic || '未命名主题',
@@ -242,12 +249,12 @@ const checkAndCreateHistory = async () => {
 
       if (result.success && result.record_id) {
         store.setRecordId(result.record_id)
-        console.log('历史记录创建成功，ID:', result.record_id)
+        saveError.value = ''
       } else {
-        console.error('创建历史记录失败:', result.error)
+        saveError.value = result.error || '创建历史记录失败'
       }
     } catch (error) {
-      console.error('创建历史记录出错:', error)
+      saveError.value = '创建历史记录出错: ' + String(error)
     }
   }
 }
@@ -455,5 +462,11 @@ watch(
 
 .page-bottom-spacer {
   height: 84px;
+}
+
+.save-error {
+  margin-top: 8px;
+  color: #cf1322;
+  font-size: 13px;
 }
 </style>

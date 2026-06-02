@@ -1,19 +1,16 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
-import { fileURLToPath, URL } from 'node:url'
+
+const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env || {}
+const apiProxyTarget = env.VITE_API_PROXY_TARGET || `http://localhost:${env.REDINK_PORT || '12398'}`
 
 export default defineConfig({
   plugins: [vue()],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
-  },
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:12398',
+        target: apiProxyTarget,
         changeOrigin: true
       }
     }

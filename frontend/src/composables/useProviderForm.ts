@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { getConfig, updateConfig, testConnection, type Config } from '../api'
+import { getAuthToken } from '../api/http'
 
 /**
  * 服务商表单管理 Composable
@@ -64,7 +65,8 @@ export const textTypeOptions = [
 // 图片服务商类型选项
 export const imageTypeOptions = [
   { value: 'google_genai', label: 'Google GenAI' },
-  { value: 'image_api', label: 'OpenAI 兼容接口' }
+  { value: 'image_api', label: 'OpenAI 兼容接口（Image API）' },
+  { value: 'openai_compatible', label: 'OpenAI 兼容接口（通用）' }
 ]
 
 /**
@@ -149,6 +151,10 @@ export function useProviderForm() {
         alert('加载配置失败: ' + (result.error || '未知错误'))
       }
     } catch (e) {
+      const status = (e as any)?.response?.status
+      if (status === 401 && !getAuthToken()) {
+        return
+      }
       alert('加载配置失败: ' + String(e))
     } finally {
       loading.value = false
@@ -156,9 +162,23 @@ export function useProviderForm() {
   }
 
   /**
+   * 清空当前已加载配置
+   */
+  function resetConfig() {
+    textConfig.value = {
+      active_provider: '',
+      providers: {}
+    }
+    imageConfig.value = {
+      active_provider: '',
+      providers: {}
+    }
+  }
+
+  /**
    * 自动保存配置
    */
-  async function autoSaveConfig() {
+  async function autoSaveConfig(): Promise<boolean> {
     try {
       const config: Partial<Config> = {
         text_generation: {
@@ -172,9 +192,13 @@ export function useProviderForm() {
       if (result.success) {
         // 重新加载配置以获取最新的脱敏 API Key
         await loadConfig()
+        return true
       }
+      alert('保存配置失败: ' + (result.error || '未知错误'))
+      return false
     } catch (e) {
-      console.error('自动保存失败:', e)
+      alert('保存配置失败: ' + String(e))
+      return false
     }
   }
 
@@ -184,8 +208,11 @@ export function useProviderForm() {
    * 激活文本服务商
    */
   async function activateTextProvider(name: string) {
+    const previous = textConfig.value.active_provider
     textConfig.value.active_provider = name
-    await autoSaveConfig()
+    if (!(await autoSaveConfig())) {
+      textConfig.value.active_provider = previous
+    }
   }
 
   /**
@@ -268,10 +295,14 @@ export function useProviderForm() {
       providerData.endpoint_type = textForm.value.endpoint_type
     }
 
+    const previousProviders = { ...textConfig.value.providers }
     textConfig.value.providers[name] = providerData
 
-    closeTextModal()
-    await autoSaveConfig()
+    if (await autoSaveConfig()) {
+      closeTextModal()
+    } else {
+      textConfig.value.providers = previousProviders
+    }
   }
 
   /**
@@ -279,11 +310,16 @@ export function useProviderForm() {
    */
   async function deleteTextProvider(name: string) {
     if (confirm(`确定要删除服务商 "${name}" 吗？`)) {
+      const previousActive = textConfig.value.active_provider
+      const previousProviders = { ...textConfig.value.providers }
       delete textConfig.value.providers[name]
       if (textConfig.value.active_provider === name) {
-        textConfig.value.active_provider = ''
+        textConfig.value.active_provider = Object.keys(textConfig.value.providers)[0] || ''
       }
-      await autoSaveConfig()
+      if (!(await autoSaveConfig())) {
+        textConfig.value.active_provider = previousActive
+        textConfig.value.providers = previousProviders
+      }
     }
   }
 
@@ -295,13 +331,17 @@ export function useProviderForm() {
     try {
       const result = await testConnection({
         type: textForm.value.type,
+        provider_category: 'text',
         provider_name: editingTextProvider.value || undefined,
         api_key: textForm.value.api_key || undefined,
         base_url: textForm.value.base_url,
-        model: textForm.value.model
+        model: textForm.value.model,
+        endpoint_type: textForm.value.endpoint_type
       })
       if (result.success) {
         alert('✅ ' + result.message)
+      } else {
+        alert('❌ 连接失败：' + (result.error || '未知错误'))
       }
     } catch (e: any) {
       alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
@@ -317,13 +357,17 @@ export function useProviderForm() {
     try {
       const result = await testConnection({
         type: provider.type,
+        provider_category: 'text',
         provider_name: name,
         api_key: undefined,
         base_url: provider.base_url,
-        model: provider.model
+        model: provider.model,
+        endpoint_type: provider.endpoint_type
       })
       if (result.success) {
         alert('✅ ' + result.message)
+      } else {
+        alert('❌ 连接失败：' + (result.error || '未知错误'))
       }
     } catch (e: any) {
       alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
@@ -336,8 +380,11 @@ export function useProviderForm() {
    * 激活图片服务商
    */
   async function activateImageProvider(name: string) {
+    const previous = imageConfig.value.active_provider
     imageConfig.value.active_provider = name
-    await autoSaveConfig()
+    if (!(await autoSaveConfig())) {
+      imageConfig.value.active_provider = previous
+    }
   }
 
   /**
@@ -408,8 +455,8 @@ export function useProviderForm() {
       short_prompt: imageForm.value.short_prompt
     }
 
-    // 如果是 OpenAI 兼容接口，保存 endpoint_type
-    if (imageForm.value.type === 'image_api') {
+    // OpenAI 兼容图片接口支持标准 images 端点或 chat/completions 端点。
+    if (['image_api', 'openai_compatible'].includes(imageForm.value.type)) {
       providerData.endpoint_type = imageForm.value.endpoint_type
     }
 
@@ -424,10 +471,14 @@ export function useProviderForm() {
       providerData.base_url = imageForm.value.base_url
     }
 
+    const previousProviders = { ...imageConfig.value.providers }
     imageConfig.value.providers[name] = providerData
 
-    closeImageModal()
-    await autoSaveConfig()
+    if (await autoSaveConfig()) {
+      closeImageModal()
+    } else {
+      imageConfig.value.providers = previousProviders
+    }
   }
 
   /**
@@ -435,11 +486,16 @@ export function useProviderForm() {
    */
   async function deleteImageProvider(name: string) {
     if (confirm(`确定要删除服务商 "${name}" 吗？`)) {
+      const previousActive = imageConfig.value.active_provider
+      const previousProviders = { ...imageConfig.value.providers }
       delete imageConfig.value.providers[name]
       if (imageConfig.value.active_provider === name) {
-        imageConfig.value.active_provider = ''
+        imageConfig.value.active_provider = Object.keys(imageConfig.value.providers)[0] || ''
       }
-      await autoSaveConfig()
+      if (!(await autoSaveConfig())) {
+        imageConfig.value.active_provider = previousActive
+        imageConfig.value.providers = previousProviders
+      }
     }
   }
 
@@ -451,13 +507,17 @@ export function useProviderForm() {
     try {
       const result = await testConnection({
         type: imageForm.value.type,
+        provider_category: 'image',
         provider_name: editingImageProvider.value || undefined,
         api_key: imageForm.value.api_key || undefined,
         base_url: imageForm.value.base_url,
-        model: imageForm.value.model
+        model: imageForm.value.model,
+        endpoint_type: imageForm.value.endpoint_type
       })
       if (result.success) {
         alert('✅ ' + result.message)
+      } else {
+        alert('❌ 连接失败：' + (result.error || '未知错误'))
       }
     } catch (e: any) {
       alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
@@ -473,13 +533,17 @@ export function useProviderForm() {
     try {
       const result = await testConnection({
         type: provider.type,
+        provider_category: 'image',
         provider_name: name,
         api_key: undefined,
         base_url: provider.base_url,
-        model: provider.model
+        model: provider.model,
+        endpoint_type: provider.endpoint_type
       })
       if (result.success) {
         alert('✅ ' + result.message)
+      } else {
+        alert('❌ 连接失败：' + (result.error || '未知错误'))
       }
     } catch (e: any) {
       alert('❌ 连接失败：' + (e.response?.data?.error || e.message))
@@ -523,6 +587,7 @@ export function useProviderForm() {
 
     // 方法
     loadConfig,
+    resetConfig,
 
     // 文本服务商方法
     activateTextProvider,

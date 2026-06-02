@@ -1,10 +1,16 @@
 """Image API 图片生成器"""
 import logging
 import base64
-import requests
 from typing import Dict, Any, Optional, List, Union
 from .base import ImageGeneratorBase
 from ..utils.image_compressor import compress_image
+from backend.utils.remote_image import (
+    allow_private_provider_urls,
+    safe_decode_base64_image,
+    safe_download_image,
+    safe_http_request,
+    validate_public_http_url,
+)
 from backend.utils.url import normalize_openai_base_url
 
 logger = logging.getLogger(__name__)
@@ -17,6 +23,12 @@ class ImageApiGenerator(ImageGeneratorBase):
         super().__init__(config)
         logger.debug("初始化 ImageApiGenerator...")
         self.base_url = normalize_openai_base_url(config.get('base_url'), default='https://api.example.com')
+        if config.get('base_url'):
+            self.base_url = validate_public_http_url(
+                self.base_url,
+                label="服务商 Base URL",
+                allow_private=allow_private_provider_urls(),
+            )
         self.model = config.get('model', 'default-model')
         self.default_aspect_ratio = config.get('default_aspect_ratio', '3:4')
         self.image_size = config.get('image_size', '4K')
@@ -149,7 +161,16 @@ class ImageApiGenerator(ImageGeneratorBase):
 
         api_url = f"{self.base_url}{self.endpoint_type}"
         logger.debug(f"  发送请求到: {api_url}")
-        response = requests.post(api_url, headers=headers, json=payload, timeout=300)
+        response = safe_http_request(
+            "POST",
+            api_url,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+            headers=headers,
+            json=payload,
+            timeout=300,
+            allow_redirects=False,
+        )
 
         if response.status_code != 200:
             error_detail = response.text[:500]
@@ -173,12 +194,7 @@ class ImageApiGenerator(ImageGeneratorBase):
             item = result["data"][0]
 
             if "b64_json" in item:
-                b64_data_uri = item["b64_json"]
-                if b64_data_uri.startswith('data:'):
-                    b64_string = b64_data_uri.split(',', 1)[1]
-                else:
-                    b64_string = b64_data_uri
-                image_data = base64.b64decode(b64_string)
+                image_data = safe_decode_base64_image(item["b64_json"])
                 logger.info(f"✅ Image API 图片生成成功: {len(image_data)} bytes")
                 return image_data
 
@@ -245,7 +261,16 @@ class ImageApiGenerator(ImageGeneratorBase):
         api_url = f"{self.base_url}{self.endpoint_type}"
         logger.info(f"Chat API 生成图片: {api_url}, model={model}")
 
-        response = requests.post(api_url, headers=headers, json=payload, timeout=300)
+        response = safe_http_request(
+            "POST",
+            api_url,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
+            headers=headers,
+            json=payload,
+            timeout=300,
+            allow_redirects=False,
+        )
 
         if response.status_code != 200:
             error_detail = response.text[:500]
@@ -300,8 +325,7 @@ class ImageApiGenerator(ImageGeneratorBase):
                     if isinstance(image_url, str) and image_url:
                         if image_url.startswith("data:image"):
                             logger.info("检测到 message.images Base64 图片数据")
-                            base64_data = image_url.split(",", 1)[1]
-                            return base64.b64decode(base64_data)
+                            return safe_decode_base64_image(image_url)
                         if image_url.startswith("http://") or image_url.startswith("https://"):
                             logger.info("检测到 message.images 图片 URL")
                             return self._download_image(image_url.strip())
@@ -321,14 +345,12 @@ class ImageApiGenerator(ImageGeneratorBase):
                     base64_urls = re.findall(base64_pattern, content)
                     if base64_urls:
                         logger.info("从 Markdown 提取到 Base64 图片数据")
-                        base64_data = base64_urls[0].split(",")[1]
-                        return base64.b64decode(base64_data)
+                        return safe_decode_base64_image(base64_urls[0])
 
                     # 纯 Base64 data URL
                     if content.startswith("data:image"):
                         logger.info("检测到 Base64 图片数据")
-                        base64_data = content.split(",")[1]
-                        return base64.b64decode(base64_data)
+                        return safe_decode_base64_image(content)
 
                     # 纯 URL
                     if content.startswith("http://") or content.startswith("https://"):
@@ -351,13 +373,8 @@ class ImageApiGenerator(ImageGeneratorBase):
         """下载图片并返回二进制数据"""
         logger.info(f"下载图片: {url[:100]}...")
         try:
-            response = requests.get(url, timeout=60)
-            if response.status_code == 200:
-                logger.info(f"✅ 图片下载成功: {len(response.content)} bytes")
-                return response.content
-            else:
-                raise Exception(f"下载图片失败: HTTP {response.status_code}")
-        except requests.exceptions.Timeout:
-            raise Exception("❌ 下载图片超时，请重试")
+            image_data = safe_download_image(url, allow_private=allow_private_provider_urls())
+            logger.info(f"✅ 图片下载成功: {len(image_data)} bytes")
+            return image_data
         except Exception as e:
             raise Exception(f"❌ 下载图片失败: {str(e)}")

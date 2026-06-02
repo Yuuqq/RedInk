@@ -3,6 +3,9 @@ import hmac
 import os
 import sys
 import ctypes
+import shutil
+import time
+from urllib.parse import unquote
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from flask import Flask, send_from_directory
@@ -12,6 +15,23 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from backend.config import Config
 from backend.routes import register_routes
+
+IMAGE_AUTH_COOKIE = "redink_auth_token"
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def _env_int(name: str, default: int, *, min_value: int | None = None) -> int:
+    raw = os.environ.get(name)
+    try:
+        value = int(raw) if raw is not None else default
+    except (TypeError, ValueError):
+        return default
+    if min_value is not None and value < min_value:
+        return default
+    return value
 
 
 class SafeStreamHandler(logging.StreamHandler):
@@ -45,6 +65,45 @@ class SafeStreamHandler(logging.StreamHandler):
             self.flush()
         except Exception:
             self.handleError(record)
+
+
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """
+    RotatingFileHandler with a Windows-safe rollover fallback.
+
+    On Windows, another process can hold the log file and make os.rename()
+    fail during automatic rollover. The default handler reports a "Logging
+    error" traceback for every emit. Fall back to copy+truncate, matching the
+    admin manual rotation behavior, so logging stays usable.
+    """
+
+    def doRollover(self):
+        try:
+            return super().doRollover()
+        except OSError:
+            self._copy_truncate_rollover()
+
+    def _copy_truncate_rollover(self):
+        if self.stream:
+            try:
+                self.stream.close()
+            finally:
+                self.stream = None
+
+        try:
+            if os.path.exists(self.baseFilename):
+                ts = time.strftime("%Y%m%d-%H%M%S")
+                backup_file = f"{self.baseFilename}.{ts}.bak"
+                shutil.copyfile(self.baseFilename, backup_file)
+                with open(self.baseFilename, "r+b") as f:
+                    f.truncate(0)
+        except Exception:
+            # Suppress rollover failures to avoid recursive logging tracebacks.
+            # The next writes still go to the original log file.
+            pass
+        finally:
+            if not self.delay:
+                self.stream = self._open()
 
 
 def _force_utf8_console():
@@ -84,8 +143,13 @@ def setup_logging():
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
 
-    # 清除已有的处理器
-    root_logger.handlers.clear()
+    # 清除并关闭已有处理器，避免重复 create_app()/测试/重载时泄漏日志文件句柄。
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+        try:
+            handler.close()
+        except Exception:
+            pass
 
     # 控制台处理器 - 详细格式
     # Use a safe handler to avoid UnicodeEncodeError on Windows consoles (GBK).
@@ -106,10 +170,10 @@ def setup_logging():
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = os.environ.get("REDINK_LOG_FILE") or str(log_dir / "redink.log")
 
-        file_handler = RotatingFileHandler(
+        file_handler = SafeRotatingFileHandler(
             log_file,
-            maxBytes=int(os.environ.get("REDINK_LOG_MAX_BYTES", str(5 * 1024 * 1024))),  # 5MB
-            backupCount=int(os.environ.get("REDINK_LOG_BACKUP_COUNT", "5")),
+            maxBytes=_env_int("REDINK_LOG_MAX_BYTES", 5 * 1024 * 1024, min_value=1),
+            backupCount=_env_int("REDINK_LOG_BACKUP_COUNT", 5, min_value=0),
             encoding="utf-8"
         )
         file_handler.setLevel(logging.DEBUG)
@@ -136,6 +200,8 @@ def create_app():
     # 设置日志
     logger = setup_logging()
     logger.info("🚀 正在启动 CSS Lab AI图文生成器...")
+    _validate_network_exposure_config(Config.HOST)
+    Config.validate_provider_config_paths()
 
     # 检查是否存在前端构建产物（Docker 环境）
     frontend_dist = Path(__file__).parent.parent / 'frontend' / 'dist'
@@ -153,6 +219,28 @@ def create_app():
     app.config.from_object(Config)
 
     @app.before_request
+    def _reject_unauthenticated_remote_clients():
+        """
+        Runtime backstop for WSGI/process-manager deployments.
+
+        Fail closed when no token is configured. Reverse proxies commonly send
+        public traffic to gunicorn from 127.0.0.1, so request.remote_addr cannot
+        safely prove that an unauthenticated request is local-only.
+        """
+        if (os.environ.get("REDINK_AUTH_TOKEN") or "").strip():
+            return None
+        if _env_flag("REDINK_ALLOW_UNAUTH_REMOTE"):
+            return None
+
+        return {
+            "success": False,
+            "error": (
+                "拒绝未认证访问。请设置 REDINK_AUTH_TOKEN，"
+                "或仅在明确受控环境中设置 REDINK_ALLOW_UNAUTH_REMOTE=1。"
+            ),
+        }, 403
+
+    @app.before_request
     def _require_api_auth():
         """
         Optional API-wide auth guard.
@@ -160,7 +248,7 @@ def create_app():
         When REDINK_AUTH_TOKEN is set, require `Authorization: Bearer <token>` for most `/api/*` routes.
         Exemptions:
         - `/api/health` (used by health checks)
-        - `/api/images/*` (used by <img> tags which can't send headers)
+        - `/api/images/*` can use either Bearer auth or the same-site image auth cookie
         - `OPTIONS` (CORS preflight)
         """
         auth_token = (os.environ.get("REDINK_AUTH_TOKEN") or "").strip()
@@ -172,20 +260,21 @@ def create_app():
             return None
         if flask_request.method == "OPTIONS":
             return None
-        if path == "/api/health" or path.startswith("/api/images/"):
+        if path == "/api/health":
             return None
+        if path.startswith("/api/images/"):
+            if _request_has_valid_auth(auth_token, allow_image_cookie=True):
+                return None
+            return {
+                "success": False,
+                "error": "未提供认证令牌。请在系统设置中填写访问控制 Token 后重试。",
+            }, 401
 
-        auth_header = flask_request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
+        if not _request_has_valid_auth(auth_token):
             return {
                 "success": False,
                 "error": "未提供认证令牌。请在请求头中添加 Authorization: Bearer <token>",
             }, 401
-
-        token = auth_header[7:]
-        if not hmac.compare_digest(token, auth_token):
-            logger.warning(f"认证失败: 来自 {flask_request.remote_addr}")
-            return {"success": False, "error": "认证令牌无效"}, 401
 
         return None
 
@@ -204,7 +293,7 @@ def create_app():
 
     CORS(app, resources={
         r"/api/*": {
-            "origins": Config.CORS_ORIGINS,
+            "origins": Config.get_cors_origins(),
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization"],
         }
@@ -217,7 +306,7 @@ def create_app():
         default_limits=[
             os.environ.get('REDINK_RATE_LIMIT', '60 per minute')
         ],
-        storage_uri="memory://",
+        storage_uri=os.environ.get("REDINK_RATE_LIMIT_STORAGE_URI", "memory://"),
     )
     app.limiter = limiter
 
@@ -237,8 +326,13 @@ def create_app():
         @app.errorhandler(404)
         def fallback(e):
             # Do not hijack API 404s, otherwise clients get HTML with 200.
-            if flask_request.path.startswith('/api/'):
+            path = flask_request.path or ""
+            if path.startswith('/api/'):
                 return {"success": False, "error": "Not Found"}, 404
+            # Do not serve index.html for missing static assets; browsers would
+            # otherwise receive HTML for JS/CSS/images and fail with MIME errors.
+            if Path(path).suffix:
+                return "Not Found", 404, {"Content-Type": "text/plain; charset=utf-8"}
             return send_from_directory(app.static_folder, 'index.html')
     else:
         @app.route('/')
@@ -250,65 +344,89 @@ def create_app():
                     "health": "/api/health",
                     "outline": "POST /api/outline",
                     "generate": "POST /api/generate",
-                    "images": "GET /api/images/<filename>"
+                    "images": "GET /api/images/<task_id>/<filename>"
                 }
             }
 
     return app
 
 
+def _request_has_valid_auth(auth_token: str, *, allow_image_cookie: bool = False) -> bool:
+    auth_header = flask_request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+        if hmac.compare_digest(token, auth_token):
+            return True
+
+    if allow_image_cookie:
+        cookie_token = flask_request.cookies.get(IMAGE_AUTH_COOKIE, "")
+        if cookie_token and hmac.compare_digest(unquote(cookie_token), auth_token):
+            return True
+
+    return False
+
+
 def _validate_config_on_startup(logger):
     """启动时验证配置"""
-    from pathlib import Path
-    import yaml
-
     logger.info("📋 检查配置文件...")
 
     # 检查 text_providers.yaml
-    text_config_path = Path(__file__).parent.parent / 'text_providers.yaml'
+    text_config_path = Config.get_text_providers_path()
     if text_config_path.exists():
-        try:
-            with open(text_config_path, 'r', encoding='utf-8') as f:
-                text_config = yaml.safe_load(f) or {}
-            active = text_config.get('active_provider', '未设置')
-            providers = list(text_config.get('providers', {}).keys())
-            logger.info(f"✅ 文本生成配置: 激活={active}, 可用服务商={providers}")
+        text_config = Config.load_text_providers_config()
+        active = text_config.get('active_provider', '未设置')
+        providers = list(text_config.get('providers', {}).keys())
+        logger.info(f"✅ 文本生成配置: 激活={active}, 可用服务商={providers}")
 
-            # 检查激活的服务商是否有 API Key
-            if active in text_config.get('providers', {}):
-                provider = text_config['providers'][active]
-                if not provider.get('api_key'):
-                    logger.warning(f"⚠️  文本服务商 [{active}] 未配置 API Key")
-                else:
-                    logger.info(f"✅ 文本服务商 [{active}] API Key 已配置")
-        except Exception as e:
-            logger.error(f"❌ 读取 text_providers.yaml 失败: {e}")
+        # 检查激活的服务商是否有 API Key
+        if active in text_config.get('providers', {}):
+            provider = text_config['providers'][active]
+            if not provider.get('api_key'):
+                logger.warning(f"⚠️  文本服务商 [{active}] 未配置 API Key")
+            else:
+                logger.info(f"✅ 文本服务商 [{active}] API Key 已配置")
     else:
         logger.warning("⚠️  text_providers.yaml 不存在，将使用默认配置")
 
     # 检查 image_providers.yaml
-    image_config_path = Path(__file__).parent.parent / 'image_providers.yaml'
+    image_config_path = Config.get_image_providers_path()
     if image_config_path.exists():
-        try:
-            with open(image_config_path, 'r', encoding='utf-8') as f:
-                image_config = yaml.safe_load(f) or {}
-            active = image_config.get('active_provider', '未设置')
-            providers = list(image_config.get('providers', {}).keys())
-            logger.info(f"✅ 图片生成配置: 激活={active}, 可用服务商={providers}")
+        image_config = Config.load_image_providers_config()
+        active = image_config.get('active_provider', '未设置')
+        providers = list(image_config.get('providers', {}).keys())
+        logger.info(f"✅ 图片生成配置: 激活={active}, 可用服务商={providers}")
 
-            # 检查激活的服务商是否有 API Key
-            if active in image_config.get('providers', {}):
-                provider = image_config['providers'][active]
-                if not provider.get('api_key'):
-                    logger.warning(f"⚠️  图片服务商 [{active}] 未配置 API Key")
-                else:
-                    logger.info(f"✅ 图片服务商 [{active}] API Key 已配置")
-        except Exception as e:
-            logger.error(f"❌ 读取 image_providers.yaml 失败: {e}")
+        # 检查激活的服务商是否有 API Key
+        if active in image_config.get('providers', {}):
+            provider = image_config['providers'][active]
+            if not provider.get('api_key'):
+                logger.warning(f"⚠️  图片服务商 [{active}] 未配置 API Key")
+            else:
+                logger.info(f"✅ 图片服务商 [{active}] API Key 已配置")
     else:
         logger.warning("⚠️  image_providers.yaml 不存在，将使用默认配置")
 
     logger.info("✅ 配置检查完成")
+
+
+def _validate_network_exposure_config(host: str):
+    """
+    Refuse unauthenticated externally bound starts by default.
+
+    REDINK_HOST may stay loopback behind nginx/Caddy while still being publicly
+    exposed, so loopback binding is not treated as proof that auth is safe to
+    omit. Set REDINK_ALLOW_UNAUTH_REMOTE=1 explicitly for isolated local/dev use.
+    """
+    if (os.environ.get("REDINK_AUTH_TOKEN") or "").strip():
+        return
+
+    if _env_flag("REDINK_ALLOW_UNAUTH_REMOTE"):
+        return
+
+    raise RuntimeError(
+        "拒绝以未认证模式启动。请设置 REDINK_AUTH_TOKEN，"
+        "或仅在明确受控环境中设置 REDINK_ALLOW_UNAUTH_REMOTE=1。"
+    )
 
 
 if __name__ == '__main__':

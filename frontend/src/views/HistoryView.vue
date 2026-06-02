@@ -25,6 +25,7 @@
 
     <!-- Stats Overview -->
     <StatsOverview v-if="stats" :stats="stats" />
+    <div v-if="loadError" class="history-load-error">{{ loadError }}</div>
 
     <!-- Toolbar: Tabs & Search -->
     <div class="toolbar-wrapper">
@@ -115,6 +116,7 @@
       :visible="!!viewingRecord"
       :record="viewingRecord"
       :regeneratingImages="regeneratingImages"
+      :refreshToken="galleryRefreshToken"
       @close="closeGallery"
       @showOutline="showOutlineModal = true"
       @regenerate="regenerateHistoryImage"
@@ -146,7 +148,8 @@ import {
   regenerateImage as apiRegenerateImage,
   updateHistory,
   scanAllTasks,
-  downloadHistoryZip
+  downloadHistoryZip,
+  getImageUrl
 } from '../api'
 import { useGeneratorStore } from '../stores/generator'
 
@@ -167,12 +170,14 @@ const stats = ref<any>(null)
 const currentTab = ref('all')
 const searchKeyword = ref('')
 const searchError = ref('')
+const loadError = ref('')
 const currentPage = ref(1)
 const totalPages = ref(1)
 
 // 查看器状态
 const viewingRecord = ref<any>(null)
 const regeneratingImages = ref<Set<number>>(new Set())
+const galleryRefreshToken = ref(0)
 const showOutlineModal = ref(false)
 const isScanning = ref(false)
 
@@ -187,9 +192,17 @@ async function loadData() {
     if (res.success) {
       records.value = res.records
       totalPages.value = res.total_pages
+      loadError.value = ''
+    } else {
+      records.value = []
+      totalPages.value = 1
+      loadError.value = res.error || '加载历史记录失败，请稍后重试'
     }
   } catch(e) {
     console.error(e)
+    records.value = []
+    totalPages.value = 1
+    loadError.value = '加载历史记录失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -201,8 +214,14 @@ async function loadData() {
 async function loadStats() {
   try {
     const res = await getHistoryStats()
-    if (res.success) stats.value = res
-  } catch(e) {}
+    if (res.success) {
+      stats.value = res
+    } else {
+      console.warn('加载统计数据失败:', res.error)
+    }
+  } catch(e) {
+    console.warn('加载统计数据失败:', e)
+  }
 }
 
 /**
@@ -259,15 +278,18 @@ async function loadRecord(id: string) {
       store.taskId = res.record.images.task_id
       store.images = res.record.outline.pages.map((_page, idx) => {
         const filename = res.record!.images.generated[idx]
+        const taskId = res.record!.images.task_id
         return {
           index: idx,
-          url: filename ? `/api/images/${res.record!.images.task_id}/${filename}` : '',
+          url: filename && taskId ? getImageUrl(taskId, filename, true) : '',
           status: filename ? 'done' : 'error',
           retryable: !filename
         }
       })
     }
     router.push('/outline')
+  } else {
+    alert('加载历史记录失败: ' + (res.error || '未知错误'))
   }
 }
 
@@ -276,7 +298,11 @@ async function loadRecord(id: string) {
  */
 async function viewImages(id: string) {
   const res = await getHistory(id)
-  if (res.success) viewingRecord.value = res.record
+  if (res.success) {
+    viewingRecord.value = res.record
+  } else {
+    alert('打开历史记录失败: ' + (res.error || '未知错误'))
+  }
 }
 
 /**
@@ -292,7 +318,11 @@ function closeGallery() {
  */
 async function confirmDelete(record: any) {
   if(confirm('确定删除吗？')) {
-    await deleteHistory(record.id)
+    const result = await deleteHistory(record.id)
+    if (!result.success) {
+      alert('删除失败: ' + (result.error || '未知错误'))
+      return
+    }
     loadData()
     loadStats()
   }
@@ -334,34 +364,32 @@ async function regenerateHistoryImage(index: number) {
     )
 
     if (result.success && result.image_url) {
-      const filename = result.image_url.split('/').pop() || null
-      viewingRecord.value.images.generated[index] = filename
+      const filename = result.image_url.split('?')[0].split('/').pop() || null
+      const nextGenerated = [...viewingRecord.value.images.generated]
+      nextGenerated[index] = filename
 
-      // 刷新图片
-      const timestamp = Date.now()
-      if (filename) {
-        const imgElements = document.querySelectorAll(`img[src*="${viewingRecord.value.images.task_id}/${filename}"]`)
-        imgElements.forEach(img => {
-          const baseUrl = (img as HTMLImageElement).src.split('?')[0]
-          ;(img as HTMLImageElement).src = `${baseUrl}?t=${timestamp}`
-        })
-      }
-
-      await updateHistory(viewingRecord.value.id, {
+      const saveResult = await updateHistory(viewingRecord.value.id, {
         images: {
           task_id: viewingRecord.value.images.task_id,
-          generated: viewingRecord.value.images.generated
+          generated: nextGenerated
         }
       })
 
-      regeneratingImages.value.delete(index)
+      if (!saveResult.success) {
+        alert('图片已重新生成，但保存到历史记录失败: ' + (saveResult.error || '未知错误'))
+        return
+      }
+
+      viewingRecord.value.images.generated = nextGenerated
+
+      galleryRefreshToken.value = Date.now()
     } else {
-      regeneratingImages.value.delete(index)
       alert('重新生成失败: ' + (result.error || '未知错误'))
     }
   } catch (e) {
-    regeneratingImages.value.delete(index)
     alert('重新生成失败: ' + String(e))
+  } finally {
+    regeneratingImages.value.delete(index)
   }
 }
 
@@ -371,7 +399,7 @@ async function regenerateHistoryImage(index: number) {
 function downloadImage(filename: string, index: number) {
   if (!viewingRecord.value) return
   const link = document.createElement('a')
-  link.href = `/api/images/${viewingRecord.value.images.task_id}/${filename}?thumbnail=false`
+  link.href = getImageUrl(viewingRecord.value.images.task_id, filename, false)
   link.download = `page_${index + 1}.png`
   link.click()
 }
@@ -381,18 +409,22 @@ function downloadImage(filename: string, index: number) {
  */
 async function downloadAllImages() {
   if (!viewingRecord.value) return
-  const res = await downloadHistoryZip(viewingRecord.value.id)
-  if (!res.success || !res.blob) {
-    alert('下载失败: ' + (res.error || '未知错误'))
-    return
-  }
+  try {
+    const res = await downloadHistoryZip(viewingRecord.value.id)
+    if (!res.success || !res.blob) {
+      alert('下载失败: ' + (res.error || '未知错误'))
+      return
+    }
 
-  const url = URL.createObjectURL(res.blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = res.filename || 'images.zip'
-  link.click()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+    const url = URL.createObjectURL(res.blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = res.filename || 'images.zip'
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  } catch (e) {
+    alert('下载失败: ' + String(e))
+  }
 }
 
 /**
@@ -511,6 +543,16 @@ onMounted(async () => {
   margin-top: 6px;
   font-size: 12px;
   color: #d1242f;
+}
+
+.history-load-error {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #ffccc7;
+  border-radius: 12px;
+  background: #fff2f0;
+  color: #cf1322;
+  font-size: 13px;
 }
 
 .search-input .icon {

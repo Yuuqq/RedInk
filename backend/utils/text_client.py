@@ -3,11 +3,11 @@ import logging
 import time
 import random
 import base64
-import requests
 from functools import wraps
 from typing import List, Optional, Union
 from .image_compressor import compress_image
 from .url import normalize_openai_base_url
+from .remote_image import allow_private_provider_urls, safe_http_request, validate_public_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,14 @@ class TextChatClient:
                 "解决方案：在系统设置页面编辑文本生成服务商，填写 API Key"
             )
 
-        self.base_url = normalize_openai_base_url(base_url, default="https://api.openai.com")
+        if base_url:
+            self.base_url = validate_public_http_url(
+                normalize_openai_base_url(base_url),
+                label="服务商 Base URL",
+                allow_private=allow_private_provider_urls(),
+            )
+        else:
+            self.base_url = normalize_openai_base_url(None, default="https://api.openai.com")
 
         # 支持自定义端点路径
         endpoint = endpoint_type or '/v1/chat/completions'
@@ -158,11 +165,15 @@ class TextChatClient:
             "Authorization": f"Bearer {self.api_key}"
         }
 
-        response = requests.post(
+        response = safe_http_request(
+            "POST",
             self.chat_endpoint,
+            label="服务商 Base URL",
+            allow_private=allow_private_provider_urls(),
             json=payload,
             headers=headers,
-            timeout=300  # 5分钟超时
+            timeout=300,  # 5分钟超时
+            allow_redirects=False,
         )
 
         if response.status_code != 200:

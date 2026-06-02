@@ -116,6 +116,12 @@ const error = ref('')
 const isRetrying = ref(false)
 const isCancelling = ref(false)
 
+interface ImageSnapshot {
+  url: string
+  status: 'generating' | 'done' | 'error' | 'retrying'
+  error?: string
+}
+
 const isGenerating = computed(() => store.progress.status === 'generating')
 
 const progressPercent = computed(() => {
@@ -160,6 +166,8 @@ function retrySingleImage(index: number) {
   const page = store.outline.pages.find(p => p.index === index)
   if (!page) return
 
+  const previous = snapshotImage(index)
+
   // 立即设置为重试状态
   store.setImageRetrying(index)
 
@@ -174,13 +182,13 @@ function retrySingleImage(index: number) {
   apiRegenerateImage(store.taskId, page, true, context)
     .then(result => {
       if (result.success && result.image_url) {
-        store.updateImage(index, result.image_url)
+        void saveAndApplyRegeneratedImage(index, result.image_url, '重试成功后保存失败', previous)
       } else {
-        store.updateProgress(index, 'error', undefined, result.error)
+        restoreOrMarkImageError(index, previous, result.error || '重试失败')
       }
     })
     .catch(e => {
-      store.updateProgress(index, 'error', undefined, String(e))
+      restoreOrMarkImageError(index, previous, String(e))
     })
 }
 
@@ -195,6 +203,10 @@ async function retryAllFailed() {
 
   const failedPages = store.getFailedPages()
   if (failedPages.length === 0) return
+  const previousByIndex = new Map<number, ImageSnapshot | null>(
+    failedPages.map(page => [page.index, snapshotImage(page.index)])
+  )
+  let streamErrorMessage = ''
 
   isRetrying.value = true
 
@@ -220,32 +232,227 @@ async function retryAllFailed() {
         store.updateProgress(event.index, 'error', undefined, event.message)
       },
       // onFinish
-      () => {
-        isRetrying.value = false
-      },
+      () => {},
       // onStreamError
       (err) => {
         console.error('重试失败:', err)
-        isRetrying.value = false
-        error.value = '重试失败: ' + err.message
+        streamErrorMessage = err.message
       }
     )
+    if (streamErrorMessage) {
+      error.value = '重试失败: ' + streamErrorMessage
+      markPagesErrorUnlessDone(failedPages.map(page => page.index), streamErrorMessage)
+    }
+
+    const saved = await saveCurrentImagesToHistory(
+      streamErrorMessage ? '补全中断后保存部分结果失败' : '补全完成后保存历史失败'
+    )
+    if (!saved) {
+      failedPages.forEach(page => {
+        restoreOrMarkImageError(page.index, previousByIndex.get(page.index) ?? null, error.value || '补全完成后保存历史失败')
+      })
+    }
+    isRetrying.value = false
   } catch (e) {
+    await saveCurrentImagesToHistory('补全异常后保存部分结果失败')
     isRetrying.value = false
     error.value = '重试失败: ' + String(e)
+    markPagesErrorUnlessDone(failedPages.map(page => page.index), String(e))
   }
+}
+
+function markPagesErrorUnlessDone(indices: number[], message: string) {
+  indices.forEach((index) => {
+    const image = store.images.find(img => img.index === index)
+    if (image && image.status !== 'done') {
+      store.updateProgress(index, 'error', undefined, message)
+    }
+  })
+}
+
+function snapshotImage(index: number): ImageSnapshot | null {
+  const image = store.images.find(img => img.index === index)
+  if (!image) return null
+  return {
+    url: image.url,
+    status: image.status,
+    error: image.error
+  }
+}
+
+function restoreOrMarkImageError(index: number, previous: ImageSnapshot | null, message: string) {
+  const image = store.images.find(img => img.index === index)
+  if (!image) return
+
+  if (previous?.status === 'done' && previous.url) {
+    image.url = previous.url
+    image.status = 'done'
+    image.error = previous.error
+    return
+  }
+
+  store.updateProgress(index, 'error', undefined, message)
+}
+
+function markUnfinishedImagesError(message: string) {
+  store.images.forEach((image) => {
+    if (image.status !== 'done') {
+      store.updateProgress(image.index, 'error', undefined, message)
+    }
+  })
+}
+
+async function markHistoryError(message: string) {
+  if (!store.recordId) return
+  await saveCurrentImagesToHistory(`保存错误状态失败: ${message}`, 'error')
 }
 
 function ensureTaskId() {
   if (store.taskId) return store.taskId
-  const rand = Math.random().toString(16).slice(2, 10)
-  store.taskId = `task_${Date.now()}_${rand}`
+  store.taskId = newTaskId()
   return store.taskId
+}
+
+function newTaskId() {
+  if (globalThis.crypto?.randomUUID) {
+    return `task_${globalThis.crypto.randomUUID().replace(/-/g, '')}`
+  }
+
+  if (globalThis.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(16)
+    globalThis.crypto.getRandomValues(bytes)
+    return `task_${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`
+  }
+
+  throw new Error('当前浏览器不支持安全随机数生成，请使用现代浏览器或 HTTPS 环境')
+}
+
+function imageFilenameFromUrl(url: string): string | null {
+  const filename = url.split('?')[0].split('/').pop()
+  return filename || null
+}
+
+function generatedFilenamesWithReplacement(index: number, imageUrl: string): Array<string | null> {
+  const generated: Array<string | null> = new Array(store.outline.pages.length).fill(null)
+  store.images.forEach((img) => {
+    if (!img.url) return
+    const filename = imageFilenameFromUrl(img.url)
+    if (img.index >= 0 && img.index < generated.length) {
+      generated[img.index] = filename
+    }
+  })
+
+  if (index >= 0 && index < generated.length) {
+    generated[index] = imageFilenameFromUrl(imageUrl)
+  }
+
+  return generated
+}
+
+function statusFromGenerated(generated: Array<string | null>): 'draft' | 'partial' | 'completed' {
+  const doneCount = generated.filter(Boolean).length
+  if (doneCount === 0) return 'draft'
+  if (doneCount < generated.length) return 'partial'
+  return 'completed'
+}
+
+function thumbnailFromGenerated(generated: Array<string | null>): string | undefined {
+  const coverIndex = store.outline.pages.find(p => p.type === 'cover')?.index ?? 0
+  return (
+    (coverIndex >= 0 && coverIndex < generated.length ? generated[coverIndex] : null)
+    || generated.find(Boolean)
+    || undefined
+  )
+}
+
+async function saveAndApplyRegeneratedImage(
+  index: number,
+  imageUrl: string,
+  failurePrefix: string,
+  previous: ImageSnapshot | null = null
+) {
+  if (!store.recordId) {
+    store.updateImage(index, imageUrl)
+    return true
+  }
+
+  const saved = await saveGeneratedToHistory(
+    generatedFilenamesWithReplacement(index, imageUrl),
+    store.taskId,
+    failurePrefix
+  )
+  if (!saved) {
+    restoreOrMarkImageError(index, previous, error.value || failurePrefix)
+    return false
+  }
+
+  store.updateImage(index, imageUrl)
+  return true
+}
+
+function currentGeneratedFilenames(): Array<string | null> {
+  const generated: Array<string | null> = new Array(store.outline.pages.length).fill(null)
+  store.images.forEach((img) => {
+    if (!img.url) return
+    if (img.index >= 0 && img.index < generated.length) {
+      generated[img.index] = imageFilenameFromUrl(img.url)
+    }
+  })
+  return generated
+}
+
+async function saveCurrentImagesToHistory(
+  failurePrefix: string,
+  statusOverride?: 'draft' | 'partial' | 'completed' | 'error'
+) {
+  return saveGeneratedToHistory(currentGeneratedFilenames(), store.taskId, failurePrefix, statusOverride)
+}
+
+async function saveGeneratedToHistory(
+  generated: Array<string | null>,
+  taskId: string | null,
+  failurePrefix: string,
+  statusOverride?: 'draft' | 'partial' | 'completed' | 'error'
+) {
+  if (!store.recordId) {
+    return true
+  }
+
+  const result = await updateHistory(store.recordId, {
+    images: {
+      task_id: taskId,
+      generated
+    },
+    status: statusOverride || statusFromGenerated(generated),
+    thumbnail: thumbnailFromGenerated(generated)
+  })
+
+  if (!result.success) {
+    error.value = `${failurePrefix}: ${result.error || '未知错误'}`
+    return false
+  }
+
+  store.markSaved()
+  return true
 }
 
 onMounted(async () => {
   if (store.outline.pages.length === 0) {
     router.push('/')
+    return
+  }
+
+  const shouldStart = store.progress.status === 'idle'
+  const shouldResume = store.progress.status === 'generating'
+
+  if (!shouldStart && !shouldResume) {
+    return
+  }
+
+  try {
+    ensureTaskId()
+  } catch (e) {
+    error.value = String(e)
     return
   }
 
@@ -256,11 +463,20 @@ onMounted(async () => {
     // 情况1：recordId 已存在（正常流程）
     // 更新历史记录状态为 generating，表示图片生成已开始
     try {
-      await updateHistory(store.recordId, { status: 'generating' })
-      console.log('历史记录状态已更新为 generating:', store.recordId)
+      const result = await updateHistory(store.recordId, {
+        status: 'generating',
+        ...(shouldStart && store.taskId
+          ? { images: { task_id: store.taskId, generated: [] } }
+          : {})
+      })
+      if (!result.success) {
+        error.value = '更新历史记录状态失败: ' + (result.error || '未知错误')
+        return
+      }
+      store.markSaved()
     } catch (e) {
-      // 更新失败不阻断生成流程，仅记录错误
-      console.error('更新历史记录状态失败:', e)
+      error.value = '更新历史记录状态失败: ' + String(e)
+      return
     }
   } else {
     // 情况2：recordId 不存在（异常情况）
@@ -270,25 +486,18 @@ onMounted(async () => {
       const result = await createHistory(store.topic, {
         raw: store.outline.raw,
         pages: store.outline.pages
-      })
+      }, store.taskId || undefined)
       if (result.success && result.record_id) {
         store.setRecordId(result.record_id)
-        console.log('兜底创建历史记录成功:', store.recordId)
+      } else {
+        error.value = '创建历史记录失败: ' + (result.error || '未知错误')
+        return
       }
     } catch (e) {
-      // 创建失败也不阻断生成流程，仅记录错误
-      console.error('兜底创建历史记录失败:', e)
+      error.value = '创建历史记录失败: ' + String(e)
+      return
     }
   }
-
-  const shouldStart = store.progress.status === 'idle'
-  const shouldResume = store.progress.status === 'generating'
-
-  if (!shouldStart && !shouldResume) {
-    return
-  }
-
-  ensureTaskId()
 
   if (shouldStart) {
     store.startGeneration()
@@ -307,14 +516,11 @@ onMounted(async () => {
     store.taskId,
     store.outline.raw,  // 传入完整大纲文本
     // onProgress
-    (event) => {
-      console.log('Progress:', event)
-    },
+    () => {},
     // onComplete
     (event) => {
-      console.log('Complete:', event)
       if (event.image_url) {
-        store.updateProgress(event.index, 'done', event.image_url)
+        store.updateImage(event.index, event.image_url)
       }
     },
     // onError
@@ -324,7 +530,6 @@ onMounted(async () => {
     },
       // onFinish
       async (event) => {
-        console.log('Finish:', event)
         store.finishGeneration(event.task_id)
         isCancelling.value = false
 
@@ -341,6 +546,7 @@ onMounted(async () => {
         }
 
         // 更新历史记录
+        let historySaveSucceeded = true
         if (store.recordId) {
           try {
             // 使用 index 对齐的图片列表（可能包含 null，占位未生成/失败的页）
@@ -350,36 +556,24 @@ onMounted(async () => {
               generatedByIndex[i] = event.images[i]
             }
 
-            const doneCount = generatedByIndex.filter(Boolean).length
+            const saved = await saveGeneratedToHistory(
+              generatedByIndex,
+              event.task_id,
+              '图片已生成，但保存到历史记录失败'
+            )
 
-            // 确定状态
-            let status = 'completed'
-            if (doneCount === 0) status = 'draft'
-            else if (doneCount < expectedCount) status = 'partial'
-
-            // 获取封面图作为缩略图（只保存文件名，不是完整URL）
-            const coverIndex = store.outline.pages.find(p => p.type === 'cover')?.index ?? 0
-            const thumbnail =
-              (coverIndex >= 0 && coverIndex < generatedByIndex.length ? generatedByIndex[coverIndex] : null)
-              || generatedByIndex.find(Boolean)
-              || undefined
-
-            await updateHistory(store.recordId, {
-              images: {
-                task_id: event.task_id,
-                generated: generatedByIndex
-              },
-              status: status,
-              thumbnail: thumbnail
-            })
-            console.log('历史记录已更新')
+            if (!saved) {
+              historySaveSucceeded = false
+            }
           } catch (e) {
+            historySaveSucceeded = false
+            error.value = '图片已生成，但保存到历史记录失败: ' + String(e)
             console.error('更新历史记录失败:', e)
           }
         }
 
       // 如果没有失败的，跳转到结果页
-      if (!hasFailedImages.value) {
+      if (historySaveSucceeded && !hasFailedImages.value) {
         setTimeout(() => {
           router.push('/result')
         }, 1000)
@@ -391,6 +585,8 @@ onMounted(async () => {
       isCancelling.value = false
       store.progress.status = 'error'
       error.value = '生成失败: ' + err.message
+      markUnfinishedImagesError(err.message)
+      void markHistoryError(err.message)
     },
     // userImages - 用户上传的参考图片
     store.userImages.length > 0 ? store.userImages : undefined,

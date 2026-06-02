@@ -12,8 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture
-def app():
+def app(monkeypatch):
     """创建测试用 Flask 应用"""
+    monkeypatch.setenv("REDINK_ALLOW_UNAUTH_REMOTE", "1")
     from backend.app import create_app
     app = create_app()
     app.config['TESTING'] = True
