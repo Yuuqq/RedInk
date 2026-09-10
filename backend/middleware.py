@@ -27,19 +27,13 @@ def require_auth(f):
         if not auth_token:
             return f(*args, **kwargs)
 
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({
-                'success': False,
-                'error': '未提供认证令牌。请在请求头中添加 Authorization: Bearer <token>'
-            }), 401
-
-        token = auth_header[7:]
-        if not hmac.compare_digest(token, auth_token):
+        # We allow both header and cookie authentication now
+        from backend.app import _request_has_valid_auth
+        if not _request_has_valid_auth(auth_token):
             logger.warning(f"认证失败: 来自 {request.remote_addr}")
             return jsonify({
                 'success': False,
-                'error': '认证令牌无效'
+                'error': '认证令牌无效或缺失。'
             }), 401
 
         return f(*args, **kwargs)

@@ -156,7 +156,7 @@ def create_image_blueprint():
             }), 400
         except Exception as e:
             log_error('/generate', e)
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"图片生成异常。\n错误详情: {error_msg}\n建议：检查图片生成服务配置和后端日志"
@@ -205,7 +205,7 @@ def create_image_blueprint():
 
         except Exception as e:
             log_error('/images', e)
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"获取图片失败: {error_msg}"
@@ -268,7 +268,7 @@ def create_image_blueprint():
 
         except Exception as e:
             log_error('/retry', e)
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"重试图片生成失败。\n错误详情: {error_msg}"
@@ -335,7 +335,7 @@ def create_image_blueprint():
 
         except Exception as e:
             log_error('/retry-failed', e)
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"批量重试失败。\n错误详情: {error_msg}"
@@ -405,7 +405,7 @@ def create_image_blueprint():
 
         except Exception as e:
             log_error('/regenerate', e)
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"重新生成图片失败。\n错误详情: {error_msg}"
@@ -433,7 +433,7 @@ def create_image_blueprint():
                 "task_id": task_id
             }), 200
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"取消任务失败。\n错误详情: {error_msg}"
@@ -480,7 +480,7 @@ def create_image_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"获取任务状态失败。\n错误详情: {error_msg}"
