@@ -97,7 +97,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"创建历史记录失败。\n错误详情: {error_msg}"
@@ -144,7 +144,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"获取历史记录列表失败。\n错误详情: {error_msg}"
@@ -178,7 +178,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"获取历史记录详情失败。\n错误详情: {error_msg}"
@@ -206,7 +206,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "exists": False,
                 "error": f"检查记录失败。\n错误详情: {error_msg}"
@@ -296,7 +296,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"更新历史记录失败。\n错误详情: {error_msg}"
@@ -328,7 +328,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"删除历史记录失败。\n错误详情: {error_msg}"
@@ -366,7 +366,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"搜索历史记录失败。\n错误详情: {error_msg}"
@@ -392,7 +392,7 @@ def create_history_blueprint():
             }), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"获取历史记录统计失败。\n错误详情: {error_msg}"
@@ -425,7 +425,7 @@ def create_history_blueprint():
             return jsonify(result), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"扫描任务失败。\n错误详情: {error_msg}"
@@ -453,7 +453,7 @@ def create_history_blueprint():
             return jsonify(result), 200
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"扫描所有任务失败。\n错误详情: {error_msg}"
@@ -524,7 +524,7 @@ def create_history_blueprint():
             )
 
         except Exception as e:
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"下载失败。\n错误详情: {error_msg}"

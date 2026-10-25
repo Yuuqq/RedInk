@@ -81,7 +81,7 @@ def create_outline_blueprint():
             }), 400
         except Exception as e:
             log_error('/outline', e)
-            error_msg = str(e)
+            error_msg = "内部服务器错误，请查看服务器日志"
             return jsonify({
                 "success": False,
                 "error": f"大纲生成异常。\n错误详情: {error_msg}\n建议：检查后端日志获取更多信息"

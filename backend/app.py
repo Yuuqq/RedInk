@@ -262,18 +262,14 @@ def create_app():
             return None
         if path == "/api/health":
             return None
-        if path.startswith("/api/images/"):
-            if _request_has_valid_auth(auth_token, allow_image_cookie=True):
-                return None
-            return {
-                "success": False,
-                "error": "未提供认证令牌。请在系统设置中填写访问控制 Token 后重试。",
-            }, 401
+        # Allow cookie for session endpoint
+        if path == "/api/auth/session":
+            return None
 
-        if not _request_has_valid_auth(auth_token):
+        if not _request_has_valid_auth(auth_token, allow_image_cookie=True):
             return {
                 "success": False,
-                "error": "未提供认证令牌。请在请求头中添加 Authorization: Bearer <token>",
+                "error": "未提供认证令牌。请提供有效的登录凭据。",
             }, 401
 
         return None
@@ -351,7 +347,7 @@ def create_app():
     return app
 
 
-def _request_has_valid_auth(auth_token: str, *, allow_image_cookie: bool = False) -> bool:
+def _request_has_valid_auth(auth_token: str, *, allow_image_cookie: bool = True) -> bool:
     auth_header = flask_request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]

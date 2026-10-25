@@ -2,11 +2,32 @@ import axios from 'axios'
 
 export const AUTH_TOKEN_STORAGE_KEY = 'csslab.authToken'
 
+// 清除旧的非 HttpOnly cookie
+if (typeof document !== 'undefined') {
+  try {
+    const cookies = document.cookie.split(';')
+    for (const cookie of cookies) {
+      if (cookie.trim().startsWith('redink_auth_token=')) {
+        document.cookie = 'redink_auth_token=; Path=/api/images; Max-Age=0'
+        document.cookie = 'redink_auth_token=; Path=/; Max-Age=0'
+      }
+    }
+  } catch (e) {}
+}
+
 export function getAuthToken(): string {
   try {
-    const token = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || ''
-    syncImageAuthCookie(token)
-    return token
+    const hasToken = localStorage.getItem('csslab.hasAuthToken')
+    if (hasToken) return '********'
+
+    // 迁移旧的 token
+    const oldToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)
+    if (oldToken) {
+      setAuthToken(oldToken)
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
+      return '********'
+    }
+    return ''
   } catch {
     return ''
   }
@@ -14,15 +35,12 @@ export function getAuthToken(): string {
 
 export function setAuthToken(token: string) {
   const value = (token || '').trim()
-  syncImageAuthCookie(value)
-  try {
-    if (!value) {
-      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY)
-    } else {
-      localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, value)
-    }
-  } catch {
-    // ignore storage errors (private mode, disabled storage, etc.)
+  if (!value) {
+    localStorage.removeItem('csslab.hasAuthToken')
+    axios.delete('/api/auth/session').catch(e => console.error('Failed to clear auth session', e))
+  } else if (value !== '********') {
+    axios.post('/api/auth/session', { token: value }).catch(e => console.error('Failed to set auth session', e))
+    localStorage.setItem('csslab.hasAuthToken', '1')
   }
 }
 
@@ -30,38 +48,11 @@ export function clearAuthToken() {
   setAuthToken('')
 }
 
-function syncImageAuthCookie(token: string) {
-  if (typeof document === 'undefined') return
-
-  try {
-    const secure = window.location.protocol === 'https:' ? '; Secure' : ''
-    if (!token) {
-      document.cookie = `redink_auth_token=; Path=/api/images; SameSite=Lax; Max-Age=0${secure}`
-      return
-    }
-
-    document.cookie = `redink_auth_token=${encodeURIComponent(token)}; Path=/api/images; SameSite=Lax; Max-Age=2592000${secure}`
-  } catch {
-    // Ignore cookie write failures; regular API calls still use Authorization.
-  }
-}
-
-try {
-  syncImageAuthCookie(localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '')
-} catch {
-  // Ignore storage errors during module initialization.
-}
-
 const http = axios.create()
 
 http.interceptors.request.use((config) => {
-  const token = getAuthToken()
-  if (token) {
-    config.headers = config.headers ?? {}
-    ;(config.headers as any).Authorization = `Bearer ${token}`
-  }
+  config.withCredentials = true
   return config
 })
 
 export default http
-
